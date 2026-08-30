@@ -54,7 +54,7 @@
     "@opencode-ai/plugin": "1.18.25",
     "@types/bun": "1.4.0",
     "@types/node": "24.12.2",
-    "eslint": "10.7.0",
+    "eslint": "10.9.1",
     "prettier": "3.9.5",
     "typescript": "5.9.3",
     "typescript-eslint": "8.64.0"
