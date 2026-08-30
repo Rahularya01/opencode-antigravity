@@ -45,7 +45,7 @@
     "prepublishOnly": "bun run check && bun run build && bun run verify:supply-chain"
   },
   "dependencies": {
-    "@ai-sdk/provider": "3.0.8"
+    "@ai-sdk/provider": "4.0.8"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "1.18.x"
