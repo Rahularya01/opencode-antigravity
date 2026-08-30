@@ -1,0 +1,62 @@
+{
+  "name": "@rahularya01/opencode-antigravity",
+  "version": "0.1.0",
+  "description": "Native Antigravity provider for OpenCode",
+  "license": "MIT",
+  "packageManager": "bun@1.4.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rahularya01/opencode-antigravity.git"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./plugin/v2": {
+      "types": "./dist/plugin-v2.d.ts",
+      "import": "./dist/plugin-v2.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "lint": "eslint src test",
+    "format:check": "prettier --check .",
+    "verify:supply-chain": "bun scripts/verify-supply-chain.ts",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test && bun run verify:supply-chain",
+    "prepublishOnly": "bun run check && bun run build && bun run verify:supply-chain"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "3.0.8"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "1.18.x"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.25",
+    "@types/bun": "1.4.0",
+    "@types/node": "24.12.2",
+    "eslint": "10.7.0",
+    "prettier": "3.9.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.64.0"
+  }
+}
