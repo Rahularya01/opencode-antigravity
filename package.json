@@ -45,7 +45,7 @@
     "prepublishOnly": "bun run check && bun run build && bun run verify:supply-chain"
   },
   "dependencies": {
-    "@ai-sdk/provider": "4.0.8"
+    "@ai-sdk/provider": "4.0.9"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "1.18.x"
@@ -53,10 +53,10 @@
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.25",
     "@types/bun": "1.4.0",
-    "@types/node": "24.12.2",
-    "eslint": "10.7.0",
-    "prettier": "3.9.5",
+    "@types/node": "26.4.0",
+    "eslint": "10.9.1",
+    "prettier": "3.9.6",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.64.0"
+    "typescript-eslint": "8.68.0"
   }
 }
