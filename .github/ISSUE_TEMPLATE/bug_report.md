@@ -1,7 +1,7 @@
 ---
 name: Bug report
 about: Report a problem with the provider
-title: ""
+title: ''
 labels: bug
 ---
 
@@ -15,6 +15,7 @@ Steps to reproduce, including relevant `opencode.json` config (redact any tokens
 What you expected to happen instead.
 
 **Environment**
+
 - OpenCode version:
 - Package version:
 - OS:
