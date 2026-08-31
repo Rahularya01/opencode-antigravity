@@ -56,6 +56,7 @@ export class AntigravityLanguageModel {
         const runtimeModel = resolveRuntimeModel(this.modelId, options.providerOptions?.antigravity?.reasoningEffort);
         const body = {
             model: runtimeModel,
+            project: this.options.projectId ?? process.env.ANTIGRAVITY_PROJECT_ID,
             contents: [{ role: 'user', parts: [{ text: textFromPrompt(options) }] }],
             generationConfig: { maxOutputTokens: options.maxOutputTokens },
         };
@@ -65,6 +66,13 @@ export class AntigravityLanguageModel {
                 authorization: `Bearer ${token}`,
                 'content-type': 'application/json',
                 accept: 'text/event-stream',
+                'user-agent': 'antigravity/hub/2.8.0 (aidev_client; os_type=linux; arch=x64; cl=963137146)',
+                'x-goog-api-client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
+                'client-metadata': JSON.stringify({
+                    ideType: 'ANTIGRAVITY',
+                    platform: 'LINUX',
+                    pluginType: 'GEMINI',
+                }),
             },
             body: JSON.stringify(body),
             signal: options.abortSignal,

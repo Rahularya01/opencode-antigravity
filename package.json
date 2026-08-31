@@ -19,6 +19,10 @@
     "./plugin/v2": {
       "types": "./dist/plugin-v2.d.ts",
       "import": "./dist/plugin-v2.js"
+    },
+    "./plugin/auth": {
+      "types": "./dist/auth-plugin.d.ts",
+      "import": "./dist/auth-plugin.js"
     }
   },
   "files": [

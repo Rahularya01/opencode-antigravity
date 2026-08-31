@@ -1,6 +1,7 @@
 import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3GenerateResult, LanguageModelV3StreamResult } from '@ai-sdk/provider';
 export type AntigravityOptions = {
     apiKey?: string;
+    projectId?: string;
     baseURL?: string;
 };
 /** AI SDK adapter for the Cloud Code Assist streamGenerateContent endpoint. */
