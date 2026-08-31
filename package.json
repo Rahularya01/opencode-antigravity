@@ -1,6 +1,6 @@
 {
   "name": "@rahularya01/opencode-antigravity",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Native Antigravity provider for OpenCode",
   "license": "MIT",
   "packageManager": "bun@1.4.0",

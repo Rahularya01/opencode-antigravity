@@ -1,9 +1,10 @@
 # @rahularya01/opencode-antigravity
 
-Unofficial native Antigravity provider for OpenCode. Run `/connect`, choose Antigravity, and sign
-in with Google. OpenCode stores and refreshes the OAuth credential outside the project.
+Unofficial native Antigravity / Cloud Code Assist provider for OpenCode. Run `/connect`, choose
+Antigravity, and complete Google sign-in. OpenCode stores and refreshes the OAuth credential;
+this package never writes Pi's `auth.json` and does not harvest other apps' tokens.
 
-Add the plugin and provider configuration to `opencode.json`:
+> Unofficial integration. Not affiliated with or endorsed by Google.
 
 ```json
 {
@@ -14,9 +15,10 @@ Add the plugin and provider configuration to `opencode.json`:
   "provider": {
     "antigravity": {
       "name": "Antigravity",
-      "npm": "@rahularya01/opencode-antigravity",
-      "models": { "gemini-3.7-flash": { "name": "Gemini 3.7 Flash" } }
+      "npm": "@rahularya01/opencode-antigravity"
     }
   }
 }
 ```
+
+`ANTIGRAVITY_ACCESS_TOKEN` remains a last-resort override. Prefer `/connect`.

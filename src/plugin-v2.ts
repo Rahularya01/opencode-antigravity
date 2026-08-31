@@ -1,22 +1,23 @@
+import type { PluginContext } from '@opencode-ai/plugin/v2/promise';
 import { createAntigravity } from './index.js';
-import { PROVIDER_ID } from './models.js';
-
-type HookEvent = {
-  model: { providerID: string; api: { id: string } };
-  options: Record<string, unknown>;
-  sdk?: { languageModel(modelID: string): unknown };
-  language?: unknown;
-};
-type HookContext = {
-  aisdk: {
-    sdk(callback: (event: HookEvent) => void): Promise<void>;
-    language(callback: (event: HookEvent) => void): Promise<void>;
-  };
-};
+import { models, PROVIDER_ID } from './models.js';
 
 export default {
   id: 'antigravity.provider',
-  async setup(ctx: HookContext) {
+  async setup(ctx: PluginContext) {
+    await ctx.catalog.transform((draft) => {
+      draft.provider.update(PROVIDER_ID, (provider) => {
+        provider.name = 'Antigravity';
+      });
+      for (const [id, info] of Object.entries(models)) {
+        draft.model.update(PROVIDER_ID, id, (model) => {
+          model.name = info.name;
+          model.enabled = true;
+          model.status = 'active';
+          model.limit = { context: info.context, output: info.output };
+        });
+      }
+    });
     await ctx.aisdk.sdk((event) => {
       if (!event.sdk && event.model.providerID === PROVIDER_ID)
         event.sdk = createAntigravity(event.options);

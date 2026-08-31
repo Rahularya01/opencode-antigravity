@@ -1,0 +1,57 @@
+name: Publish Package to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Setup Node.js for npm registry auth
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Run checks (typecheck, lint, format, tests)
+        run: bun run check
+
+      - name: Publish to npm (skip if version already exists)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          NAME="$(bun --print "require('./package.json').name")"
+          VERSION="$(bun --print "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::tag v$TAG != package.json $VERSION"
+            exit 1
+          fi
+
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${NAME}@${VERSION} already on npm; skip."
+            exit 0
+          fi
+
+          npm publish --access public --provenance
