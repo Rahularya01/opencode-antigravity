@@ -41,16 +41,27 @@ export const ANTIGRAVITY_ROUTING: Record<string, AntigravityRouting> = {
     },
     defaultRequestId: "gemini-3.1-pro-low",
   },
-  "gemini-3.7-flash": {
-    off: "gemini-3.7-flash-low",
+  "gemini-3.8-flash": {
+    off: "gemini-3.8-flash-tiered",
     routing: {
-      minimal: "gemini-3.7-flash-low",
-      low: "gemini-3.7-flash-low",
-      medium: "gemini-3.7-flash-medium",
-      high: "gemini-3.7-flash-high",
-      xhigh: "gemini-3.7-flash-high",
+      minimal: "gemini-3.8-flash-tiered",
+      low: "gemini-3.8-flash-tiered",
+      medium: "gemini-3.8-flash-tiered",
+      high: "gemini-3.8-flash-tiered",
+      xhigh: "gemini-3.8-flash-tiered",
     },
-    defaultRequestId: "gemini-3.7-flash-low",
+    defaultRequestId: "gemini-3.8-flash-tiered",
+  },
+  "gemini-3.7-flash": {
+    off: "gemini-3.7-flash-tiered",
+    routing: {
+      minimal: "gemini-3.7-flash-tiered",
+      low: "gemini-3.7-flash-tiered",
+      medium: "gemini-3.7-flash-tiered",
+      high: "gemini-3.7-flash-tiered",
+      xhigh: "gemini-3.7-flash-tiered",
+    },
+    defaultRequestId: "gemini-3.7-flash-tiered",
   },
   "gemini-3.6-flash": {
     off: "gemini-3.6-flash-low",
@@ -87,6 +98,8 @@ export const ANTIGRAVITY_ROUTING: Record<string, AntigravityRouting> = {
 };
 
 export const RUNTIME_MAX_OUTPUT_TOKENS: Record<string, number> = {
+  "gemini-3.8-flash": 65536,
+  "gemini-3.8-flash-tiered": 65536,
   "gemini-3.7-flash": 65536,
   "gemini-3.7-flash-tiered": 65536,
   "gemini-3.7-flash-low": 65536,
@@ -149,6 +162,15 @@ export function getAntigravityRequestModelId(modelId: string, effort: string | u
 }
 
 export function getFallbackRuntimeModel(runtimeModel: string, effort?: string): string | undefined {
+  if (runtimeModel === "gemini-3.8-flash-tiered") {
+    return getAntigravityRequestModelId("gemini-3.7-flash", effort);
+  }
+  if (runtimeModel.startsWith("gemini-3.8-flash-")) {
+    return runtimeModel.replace("gemini-3.8-flash-", "gemini-3.7-flash-tiered");
+  }
+  if (runtimeModel === "gemini-3.8-flash") {
+    return "gemini-3.7-flash-tiered";
+  }
   if (runtimeModel === "gemini-3.7-flash-tiered") {
     return getAntigravityRequestModelId("gemini-3.6-flash", effort);
   }
@@ -180,7 +202,11 @@ export function getThinkingConfig(
   modelId: string,
   effort: string | undefined,
 ): ThinkingWire | undefined {
-  if (modelId === "gemini-3.7-flash" || modelId === "gemini-3.6-flash") {
+  if (
+    modelId === "gemini-3.8-flash" ||
+    modelId === "gemini-3.7-flash" ||
+    modelId === "gemini-3.6-flash"
+  ) {
     return { includeThoughts: true, thinkingLevel: googleLevel(effort) };
   }
   if (modelId === "gemini-3.5-flash") {

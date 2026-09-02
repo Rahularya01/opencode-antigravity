@@ -3,6 +3,7 @@ import {
   convertPromptToContents,
   convertToolsToGemini,
   buildAntigravityRequestBody,
+  unsupportedSettingWarnings,
 } from "../src/stream/transform.js";
 import { friendlyAntigravityError } from "../src/stream/stream.js";
 import { GeminiRole } from "../src/types/enums.js";
@@ -116,5 +117,182 @@ describe("Antigravity Stream & Transform", () => {
   it("formats user-friendly error messages", () => {
     expect(friendlyAntigravityError(401, "unauthorized")).toContain("opencode auth login");
     expect(friendlyAntigravityError(429, "Quota exceeded. Resets in 2 hours")).toContain("quota reached");
+  });
+
+  it("injects a thought-signature sentinel on replayed Gemini tool calls", () => {
+    const prompt = [
+      {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool-call" as const,
+            toolCallId: "call_123",
+            toolName: "glob",
+            input: { pattern: "**/*" },
+          },
+        ],
+      },
+    ];
+
+    const { contents } = convertPromptToContents(prompt, "gemini-3.7-flash", "gemini-3.7-flash-low");
+    const part = contents[1]?.parts[0];
+    expect(part && "functionCall" in part && part.functionCall.name).toBe("glob");
+    expect(part && "thoughtSignature" in part && part.thoughtSignature).toBe(
+      "skip_thought_signature_validator",
+    );
+  });
+
+  it("marks generate requests as antigravity agent traffic", () => {
+    const body = buildAntigravityRequestBody({
+      modelId: "gemini-3.7-flash",
+      runtimeModel: "gemini-3.7-flash-low",
+      projectId: "real-cloud-project",
+      callOptions: {
+        prompt: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "hi" }],
+          },
+        ],
+      } as never,
+    });
+    expect(body.requestType).toBe("agent");
+    expect(body.userAgent).toBe("antigravity");
+    expect(body.project).toBe("real-cloud-project");
+  });
+
+  it("inlines $ref chains so no pointer reaches the backend", () => {
+    // A definition that references another definition. Walking $defs before
+    // properties used to mark every definition as visited, leaving the nested
+    // pointer unresolved and the request rejected as `Unknown name "$ref"`.
+    const schema = {
+      type: "object",
+      $defs: {
+        Inner: { type: "object", properties: { deep: { $ref: "#/$defs/Leaf" } } },
+        Leaf: { type: "string", description: "leaf" },
+      },
+      properties: {
+        first: { $ref: "#/$defs/Inner" },
+        second: { $ref: "#/$defs/Inner" },
+      },
+    };
+
+    const decl = convertToolsToGemini([
+      { type: "function" as const, name: "t", description: "d", inputSchema: schema },
+    ])?.[0]?.functionDeclarations?.[0];
+
+    expect(JSON.stringify(decl?.parametersJsonSchema)).not.toContain("$ref");
+    // Both uses of the shared definition expand, not just the first.
+    expect(decl?.parametersJsonSchema).toEqual({
+      type: "object",
+      properties: {
+        first: { type: "object", properties: { deep: { type: "string", description: "leaf" } } },
+        second: { type: "object", properties: { deep: { type: "string", description: "leaf" } } },
+      },
+    });
+  });
+
+  it("terminates on recursive schemas and drops unresolvable pointers", () => {
+    const recursive = convertToolsToGemini([
+      {
+        type: "function" as const,
+        name: "tree",
+        description: "d",
+        inputSchema: {
+          type: "object",
+          $defs: {
+            Node: {
+              type: "object",
+              properties: { name: { type: "string" }, child: { $ref: "#/$defs/Node" } },
+            },
+          },
+          properties: { root: { $ref: "#/$defs/Node" } },
+        },
+      },
+    ])?.[0]?.functionDeclarations?.[0];
+    expect(JSON.stringify(recursive?.parametersJsonSchema)).not.toContain("$ref");
+
+    const dangling = convertToolsToGemini([
+      {
+        type: "function" as const,
+        name: "d",
+        description: "d",
+        inputSchema: { type: "object", properties: { x: { $ref: "#/$defs/Missing" } } },
+      },
+    ])?.[0]?.functionDeclarations?.[0];
+    expect(JSON.stringify(dangling?.parametersJsonSchema)).not.toContain("$ref");
+  });
+
+  it("survives malformed tool-call arguments replayed from history", () => {
+    const prompt = [
+      {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool-call" as const,
+            toolCallId: "call_1",
+            toolName: "bash",
+            // Truncated mid-string, as a cut-off stream would leave it.
+            input: '{"cmd":"ls',
+          },
+        ],
+      },
+    ];
+
+    // Must not throw: one bad history entry would otherwise poison every
+    // later turn in the session that replays it.
+    const { contents } = convertPromptToContents(prompt, "gemini-3.7-flash", "gemini-3.7-flash-low");
+    const part = contents[1]?.parts[0];
+    expect(part && "functionCall" in part && part.functionCall.name).toBe("bash");
+    expect(part && "functionCall" in part && part.functionCall.args).toEqual({});
+  });
+
+  it("maps toolChoice onto the Gemini function-calling mode", () => {
+    const build = (toolChoice: unknown) =>
+      buildAntigravityRequestBody({
+        modelId: "gemini-3.7-flash",
+        runtimeModel: "gemini-3.7-flash-low",
+        projectId: "p",
+        callOptions: {
+          prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+          tools: [
+            { type: "function", name: "read", description: "r", inputSchema: { type: "object" } },
+          ],
+          toolChoice,
+        } as never,
+      }).request.toolConfig?.functionCallingConfig;
+
+    expect(build(undefined)?.mode).toBe("VALIDATED");
+    expect(build({ type: "auto" })?.mode).toBe("VALIDATED");
+    expect(build({ type: "none" })?.mode).toBe("NONE");
+    expect(build({ type: "required" })?.mode).toBe("ANY");
+    const specific = build({ type: "tool", toolName: "read" });
+    expect(specific?.mode).toBe("ANY");
+    expect(specific?.allowedFunctionNames).toEqual(["read"]);
+  });
+
+  it("forwards topK and stopSequences and warns about settings it drops", () => {
+    const callOptions = {
+      prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      topK: 20,
+      stopSequences: ["STOP"],
+      seed: 7,
+      frequencyPenalty: 0.5,
+    } as never;
+
+    const body = buildAntigravityRequestBody({
+      modelId: "gemini-3.7-flash",
+      runtimeModel: "gemini-3.7-flash-low",
+      projectId: "p",
+      callOptions,
+    });
+    expect(body.request.generationConfig?.topK).toBe(20);
+    expect(body.request.generationConfig?.stopSequences).toEqual(["STOP"]);
+
+    const features = unsupportedSettingWarnings(callOptions).map((w) =>
+      w.type === "unsupported" ? w.feature : w.type,
+    );
+    expect(features).toContain("seed");
+    expect(features).toContain("frequencyPenalty");
   });
 });

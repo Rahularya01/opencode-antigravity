@@ -1,1 +1,7 @@
-export { createAntigravity, type CreateAntigravityOptions } from "../opencode/sdk.js";
+export {
+  createAntigravity,
+  createAntigravity as default,
+  antigravity,
+  type CreateAntigravityOptions,
+  type AntigravityProvider,
+} from "../opencode/sdk.js";

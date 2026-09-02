@@ -3,18 +3,25 @@ import {
   generateAntigravityAuthParams,
   refreshAntigravityAccessToken,
 } from "../auth/oauth.js";
-import { fallbackModelConfig } from "../models/catalog.js";
+import { isGeneratedProjectId, ANTIGRAVITY_MANAGED_PROJECT_ID } from "../client/client.js";
+import { modelsToOpenCodeConfig } from "../models/catalog.js";
 import { ANTIGRAVITY_PROVIDER_ID } from "./plugin-id.js";
 
-async function loadModels(accessToken?: string): Promise<Record<string, unknown>> {
-  return fallbackModelConfig();
+/**
+ * `config()` runs on OpenCode startup, before auth is resolved, so there is no
+ * token to query the live catalog with and no budget for a network round trip.
+ * The static catalog is the answer here; pass discovered models through
+ * `modelsToOpenCodeConfig` once a request-time listing is available.
+ */
+function loadModels(): Record<string, unknown> {
+  return modelsToOpenCodeConfig();
 }
 
 export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
   return async (input) => ({
     async config(cfg) {
       cfg.provider ??= {};
-      const models = await loadModels();
+      const models = loadModels();
       const existing = cfg.provider[ANTIGRAVITY_PROVIDER_ID] as
         | { models?: Record<string, unknown>; npm?: string; name?: string }
         | undefined;
@@ -53,6 +60,8 @@ export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
                   access: result.access,
                   refresh: result.refresh,
                   expires: result.expires,
+                  ...(result.projectId ? { projectId: result.projectId } : {}),
+                  ...(result.email ? { email: result.email } : {}),
                 };
               },
             };
@@ -83,9 +92,23 @@ export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
       async loader(getAuth) {
         const auth = await getAuth();
         let accessToken: string | undefined;
+        let projectId: string | undefined;
+        let email: string | undefined;
 
         if (auth?.type === "oauth") {
           accessToken = auth.access;
+          const storedProject = (auth as Record<string, unknown>).projectId;
+          const storedEmail = (auth as Record<string, unknown>).email;
+          email = typeof storedEmail === "string" && storedEmail.trim() ? storedEmail.trim() : undefined;
+          if (
+            typeof storedProject === "string" &&
+            storedProject.trim() &&
+            !isGeneratedProjectId(storedProject.trim(), email)
+          ) {
+            projectId = storedProject.trim();
+          } else {
+            projectId = ANTIGRAVITY_MANAGED_PROJECT_ID;
+          }
           if (auth.refresh && auth.expires && auth.expires < Date.now() + 60_000) {
             try {
               // Startup only needs a usable access token. Project discovery is
@@ -100,6 +123,11 @@ export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
                     access: refreshed.access,
                     refresh: refreshed.refresh,
                     expires: refreshed.expires,
+                    ...(projectId ? { projectId } : {}),
+                    // Carried forward deliberately: the email seeds
+                    // isGeneratedProjectId, so dropping it here would silently
+                    // disable that check from the first refresh onward.
+                    ...(email ? { email } : {}),
                   },
                 });
               }
@@ -113,6 +141,7 @@ export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
 
         return {
           ...(accessToken ? { accessToken } : {}),
+          ...(projectId ? { projectId } : {}),
           workspaceRoot: input.directory,
         };
       },

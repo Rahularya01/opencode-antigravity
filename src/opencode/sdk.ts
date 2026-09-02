@@ -1,5 +1,7 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { getAntigravityAccessTokenFromEnv } from "../auth/oauth.js";
+import { endpointCandidates } from "../client/client.js";
+import { prewarmConnection } from "../utils/http.js";
 import { resolveCatalogAccessToken } from "./auth-store.js";
 import { createAntigravityLanguageModel } from "./language-model.js";
 
@@ -22,12 +24,45 @@ async function resolveAccessToken(options: CreateAntigravityOptions): Promise<st
   throw new Error("No Antigravity access token found. Run `opencode auth login` for provider antigravity.");
 }
 
-export function createAntigravity(options: CreateAntigravityOptions = {}) {
-  const providerId = options.name || "antigravity";
-
-  return {
-    languageModel(modelId: string): LanguageModelV3 {
-      return createAntigravityLanguageModel(modelId, providerId, options, () => resolveAccessToken(options));
-    },
-  };
+export interface AntigravityProvider {
+  (modelId: string): LanguageModelV3;
+  languageModel(modelId: string): LanguageModelV3;
+  chatModel?(modelId: string): LanguageModelV3;
 }
+
+let prewarmed = false;
+
+/**
+ * Pay the TLS handshake once at provider construction rather than on the first
+ * message of the session. Best-effort and fire-and-forget.
+ */
+function prewarmOnce(): void {
+  if (prewarmed) return;
+  prewarmed = true;
+  try {
+    const base = endpointCandidates()[0];
+    if (base) prewarmConnection(base);
+  } catch {
+    // A misconfigured base URL is reported when a request is actually made.
+  }
+}
+
+export function createAntigravity(options: CreateAntigravityOptions = {}): AntigravityProvider {
+  const providerId = options.name || "antigravity";
+  prewarmOnce();
+
+  const createModel = (modelId: string): LanguageModelV3 =>
+    createAntigravityLanguageModel(modelId, providerId, options, () => resolveAccessToken(options));
+
+  const provider = function (modelId: string): LanguageModelV3 {
+    return createModel(modelId);
+  } as AntigravityProvider;
+
+  provider.languageModel = createModel;
+  provider.chatModel = createModel;
+
+  return provider;
+}
+
+export const antigravity = createAntigravity;
+export default createAntigravity;

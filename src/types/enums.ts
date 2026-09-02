@@ -10,8 +10,8 @@ export enum GeminiRole {
 }
 
 export enum AntigravityRequestType {
-  Agent = "AGENT",
-  Chat = "CHAT",
+  Agent = "agent",
+  Chat = "chat",
 }
 
 export enum AntigravityUserAgent {

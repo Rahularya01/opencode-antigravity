@@ -43,6 +43,7 @@ export interface GeminiFunctionCallPart {
     id?: string;
     thought_signature?: string;
   };
+  thoughtSignature?: string;
 }
 
 export interface GeminiFunctionResponsePart {
@@ -157,7 +158,7 @@ export type AntigravityStreamEvent =
   | { type: "text_end"; contentIndex: number; content: string }
   | { type: "thinking_start"; contentIndex: number }
   | { type: "thinking_delta"; contentIndex: number; delta: string }
-  | { type: "thinking_end"; contentIndex: number; content: string }
+  | { type: "thinking_end"; contentIndex: number; content: string; thoughtSignature?: string }
   | {
       type: "toolcall_start";
       contentIndex: number;
@@ -167,11 +168,17 @@ export type AntigravityStreamEvent =
   | {
       type: "toolcall_delta";
       contentIndex: number;
+      id: string;
       delta: string;
     }
   | {
       type: "toolcall_end";
-      toolCall: { id: string; name: string; arguments: Record<string, unknown> };
+      toolCall: {
+        id: string;
+        name: string;
+        arguments: Record<string, unknown>;
+        thoughtSignature?: string;
+      };
     }
   | {
       type: "done";
@@ -180,7 +187,8 @@ export type AntigravityStreamEvent =
         input: number;
         output: number;
         cacheRead: number;
-        cacheWrite: number;
+        /** Only set when the backend reports one; Gemini usageMetadata has no such field. */
+        cacheWrite?: number;
         total: number;
       };
     }

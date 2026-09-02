@@ -1,11 +1,13 @@
 import type {
   LanguageModelV3,
   LanguageModelV3CallOptions,
+  LanguageModelV3Content,
   LanguageModelV3FinishReason,
   LanguageModelV3StreamPart,
   LanguageModelV3Usage,
 } from "@ai-sdk/provider";
 import { streamAntigravity } from "../stream/stream.js";
+import { unsupportedSettingWarnings } from "../stream/transform.js";
 import { reasoningFromCall, sessionIdFromHeaders } from "./prompt.js";
 import type { CreateAntigravityOptions } from "./sdk.js";
 
@@ -37,46 +39,77 @@ export function createAntigravityLanguageModel(
 
     async doGenerate(callOptions) {
       const { stream } = await this.doStream(callOptions);
-      const parts: LanguageModelV3StreamPart[] = [];
       const reader = stream.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parts.push(value);
-      }
       let usage = emptyUsage();
       let reason: LanguageModelV3FinishReason = { unified: "stop", raw: undefined };
-      const folded: Array<{ type: string; text?: string; toolCallId?: string; toolName?: string; input?: string }> =
-        [];
-      const textParts: string[] = [];
-      const reasoningParts: string[] = [];
-      for (const part of parts) {
-        if (part.type === "text-delta") textParts.push(part.delta);
-        if (part.type === "reasoning-delta") reasoningParts.push(part.delta);
-        if (part.type === "tool-call") {
-          folded.push({
-            type: "tool-call",
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            input: part.input,
-          });
+
+      // Collect blocks in the order the model emitted them. Bucketing all
+      // reasoning ahead of all text ahead of all tool calls would misrepresent
+      // an interleaved response, and dropping providerMetadata would lose the
+      // thought signatures the backend requires back on the following turn.
+      const content: LanguageModelV3Content[] = [];
+      const openText = new Map<string, { type: "text"; text: string }>();
+      const openReasoning = new Map<string, { type: "reasoning"; text: string }>();
+
+      while (true) {
+        const { done, value: part } = await reader.read();
+        if (done) break;
+
+        switch (part.type) {
+          case "text-delta": {
+            const block = openText.get(part.id);
+            if (block) block.text += part.delta;
+            else {
+              const created = { type: "text" as const, text: part.delta };
+              openText.set(part.id, created);
+              content.push(created);
+            }
+            break;
+          }
+          case "text-end":
+            openText.delete(part.id);
+            break;
+          case "reasoning-delta": {
+            const block = openReasoning.get(part.id);
+            if (block) block.text += part.delta;
+            else {
+              const created = { type: "reasoning" as const, text: part.delta };
+              openReasoning.set(part.id, created);
+              content.push(created);
+            }
+            break;
+          }
+          case "reasoning-end": {
+            const block = openReasoning.get(part.id);
+            if (block && part.providerMetadata) {
+              Object.assign(block, { providerMetadata: part.providerMetadata });
+            }
+            openReasoning.delete(part.id);
+            break;
+          }
+          case "tool-call":
+            content.push({
+              type: "tool-call",
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              input: part.input,
+              ...(part.providerMetadata ? { providerMetadata: part.providerMetadata } : {}),
+            });
+            break;
+          case "finish":
+            usage = part.usage;
+            reason = part.finishReason;
+            break;
+          case "error":
+            throw part.error;
         }
-        if (part.type === "finish") {
-          usage = part.usage;
-          reason = part.finishReason;
-        }
-        if (part.type === "error") throw part.error;
       }
-      const content = [
-        ...(reasoningParts.length ? [{ type: "reasoning" as const, text: reasoningParts.join("") }] : []),
-        ...(textParts.length ? [{ type: "text" as const, text: textParts.join("") }] : []),
-        ...folded,
-      ];
+
       return {
-        content: (content.length ? content : [{ type: "text" as const, text: "" }]) as never,
+        content: content.length ? content : [{ type: "text" as const, text: "" }],
         finishReason: reason,
         usage,
-        warnings: [],
+        warnings: unsupportedSettingWarnings(callOptions),
       };
     },
 
@@ -84,6 +117,7 @@ export function createAntigravityLanguageModel(
       const accessToken = await getAccessToken();
       const sessionId = sessionIdFromHeaders(callOptions.headers);
       const reasoningEffort = reasoningFromCall(callOptions);
+      const warnings = unsupportedSettingWarnings(callOptions);
 
       const inner = streamAntigravity(modelId, callOptions, {
         accessToken,
@@ -94,7 +128,7 @@ export function createAntigravityLanguageModel(
 
       const stream = new ReadableStream<LanguageModelV3StreamPart>({
         async start(controller) {
-          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.enqueue({ type: "stream-start", warnings });
           const textIds = new Map<number, string>();
           const thinkIds = new Map<number, string>();
 
@@ -130,7 +164,18 @@ export function createAntigravityLanguageModel(
                 }
                 case "thinking_end": {
                   const id = thinkIds.get(event.contentIndex) ?? `reasoning-${event.contentIndex}`;
-                  controller.enqueue({ type: "reasoning-end", id });
+                  controller.enqueue({
+                    type: "reasoning-end",
+                    id,
+                    ...(event.thoughtSignature
+                      ? {
+                          providerMetadata: {
+                            google: { thoughtSignature: event.thoughtSignature },
+                            antigravity: { thoughtSignature: event.thoughtSignature },
+                          },
+                        }
+                      : {}),
+                  });
                   break;
                 }
                 case "toolcall_start": {
@@ -144,18 +189,26 @@ export function createAntigravityLanguageModel(
                 case "toolcall_delta": {
                   controller.enqueue({
                     type: "tool-input-delta",
-                    id: `call-${event.contentIndex}`,
+                    id: event.id,
                     delta: event.delta,
                   });
                   break;
                 }
                 case "toolcall_end": {
+                  const thoughtSignature = event.toolCall.thoughtSignature;
+                  const providerMetadata = thoughtSignature
+                    ? {
+                        google: { thoughtSignature },
+                        antigravity: { thoughtSignature },
+                      }
+                    : undefined;
                   controller.enqueue({ type: "tool-input-end", id: event.toolCall.id });
                   controller.enqueue({
                     type: "tool-call",
                     toolCallId: event.toolCall.id,
                     toolName: event.toolCall.name,
                     input: JSON.stringify(event.toolCall.arguments ?? {}),
+                    ...(providerMetadata ? { providerMetadata } : {}),
                   });
                   break;
                 }
@@ -196,10 +249,7 @@ export function createAntigravityLanguageModel(
         },
       });
 
-      return {
-        stream,
-        warnings: [],
-      };
+      return { stream };
     },
   };
 }

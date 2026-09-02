@@ -57,6 +57,7 @@ Pick a model using OpenCode's model selector or CLI:
 
 | Model ID | Display Name | Thinking / Reasoning | Context Window | Max Output Tokens |
 | --- | --- | --- | --- | --- |
+| `antigravity/gemini-3.8-flash` | Gemini 3.8 Flash | Yes (Low / Medium / High) | 1,048,576 | 65,536 |
 | `antigravity/gemini-3.7-flash` | Gemini 3.7 Flash | Yes (Low / Medium / High) | 1,048,576 | 65,536 |
 | `antigravity/gemini-3.6-flash` | Gemini 3.6 Flash | Yes (Low / Medium / High) | 1,048,576 | 65,536 |
 | `antigravity/gemini-3.5-flash` | Gemini 3.5 Flash | Yes (Low / Medium / High) | 1,048,576 | 65,536 |

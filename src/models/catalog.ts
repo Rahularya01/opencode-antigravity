@@ -2,6 +2,23 @@ import type { OpenCodeModelConfig } from "./types.js";
 import { ANTIGRAVITY_ROUTING, RUNTIME_MAX_OUTPUT_TOKENS } from "./models.js";
 
 export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
+  "gemini-3.8-flash": {
+    name: "Gemini 3.8 Flash (Antigravity)",
+    reasoning: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_536,
+    },
+    modalities: {
+      input: ["text", "image"],
+      output: ["text"],
+    },
+    variants: {
+      low: { effort: "low" },
+      medium: { effort: "medium" },
+      high: { effort: "high" },
+    },
+  },
   "gemini-3.7-flash": {
     name: "Gemini 3.7 Flash (Antigravity)",
     reasoning: true,

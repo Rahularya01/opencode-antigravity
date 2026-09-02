@@ -35,18 +35,85 @@ export const ANTIGRAVITY_MODEL_ENUM: Record<string, string> = {
   "gemini-pro-agent": "MODEL_PLACEHOLDER_M16",
 };
 
+import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
+import crypto from "node:crypto";
+
+function getConversationSeed(prompt?: LanguageModelV3Prompt): string {
+  if (!prompt || prompt.length === 0) return crypto.randomUUID();
+  for (const msg of prompt) {
+    if (msg.role === "user") {
+      const content = msg.content as unknown;
+      if (typeof content === "string" && content.trim()) {
+        return content.trim();
+      }
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (isRecord(part) && part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+            return part.text.trim();
+          }
+        }
+      }
+    }
+  }
+  return crypto.randomUUID();
+}
+
+function deterministicHash(seed: string): Buffer {
+  return crypto.createHash("sha256").update(seed).digest();
+}
+
+function deterministicUuid(seed: string): string {
+  const hash = deterministicHash(seed);
+  hash[6] = (hash[6]! & 0x0f) | 0x40;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+  const hex = hash.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+function deterministicBigInt(seed: string): string {
+  const hash = deterministicHash(seed);
+  return String(hash.readBigInt64LE(0));
+}
+
+function calculateStep(prompt?: LanguageModelV3Prompt): { step: number; lastStepIndex: number } {
+  if (!prompt || prompt.length === 0) {
+    return { step: 1, lastStepIndex: 0 };
+  }
+  let turnCount = 0;
+  for (const msg of prompt) {
+    if (msg.role === "assistant" || msg.role === "tool") {
+      turnCount++;
+    }
+  }
+  const step = Math.max(1, Math.floor(turnCount / 2) + 1);
+  return { step, lastStepIndex: Math.max(0, step - 1) };
+}
+
 export function antigravityRequestEnvelope(
   wireModelId: string,
   isClaude: boolean,
+  options?: {
+    sessionId?: string;
+    prompt?: LanguageModelV3Prompt;
+    step?: number;
+  },
 ): { requestId: string; sessionId: string; labels: Record<string, string> } {
-  const agentId = crypto.randomUUID();
-  const trajectoryId = crypto.randomUUID();
-  const step = 2;
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  const sessionId = String(new DataView(bytes.buffer, bytes.byteOffset, 8).getBigInt64(0, true));
+  const seed = getConversationSeed(options?.prompt);
+  const agentId = deterministicUuid(`agent:${seed}`);
+  const trajectoryId = deterministicUuid(`trajectory:${seed}`);
+  const { step, lastStepIndex } =
+    options?.step !== undefined
+      ? { step: options.step, lastStepIndex: Math.max(0, options.step - 1) }
+      : calculateStep(options?.prompt);
+
+  const sessionId =
+    options?.sessionId && options.sessionId.trim()
+      ? options.sessionId.trim()
+      : deterministicBigInt(`session:${seed}`);
+
   const usageLabel = isClaude ? "true" : "false";
   const labels: Record<string, string> = {
-    last_step_index: String(step - 1),
+    last_step_index: String(lastStepIndex),
     trajectory_id: trajectoryId,
     used_claude: usageLabel,
     used_claude_conservative: usageLabel,

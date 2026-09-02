@@ -2,7 +2,6 @@ import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import {
   antigravityHeaders,
   endpointCandidates,
-  fetchAvailableRuntimeModel,
   jsonOrTextError,
   resolveProjectId,
 } from "../client/client.js";
@@ -18,6 +17,94 @@ import type {
 import { redactSecrets } from "../utils/security.js";
 import { antigravityFetch } from "../utils/http.js";
 import { buildAntigravityRequestBody } from "./transform.js";
+
+type PendingToolCall = {
+  /** Backend-assigned id, when the backend supplied one. */
+  id?: string;
+  name: string;
+  args: Record<string, unknown>;
+  thoughtSignature?: string;
+};
+
+function jsonSize(value: unknown): number {
+  return JSON.stringify(value ?? {}).length;
+}
+
+/**
+ * True when `next` reads as a further-accumulated version of `prev` rather than
+ * a separate call: every key `prev` already had is either unchanged or a string
+ * `next` merely extended, and nothing shrank.
+ *
+ * The same key holding an unrelated value is the tell that these are two
+ * different calls. Comparing only serialized size would treat `{file:"a.ts"}`
+ * and `{file:"b/long.ts"}` as one accumulating call and drop the shorter.
+ */
+function argsAreRicher(
+  next: Record<string, unknown>,
+  prev: Record<string, unknown>,
+): boolean {
+  const prevKeys = Object.keys(prev);
+  if (prevKeys.length === 0) return true;
+  for (const key of prevKeys) {
+    if (!(key in next)) return false;
+    const before = prev[key];
+    const after = next[key];
+    if (Object.is(before, after)) continue;
+    // A partially streamed string argument grows by appending to it.
+    if (typeof before === "string" && typeof after === "string" && after.startsWith(before)) {
+      continue;
+    }
+    return false;
+  }
+  return jsonSize(next) >= jsonSize(prev);
+}
+
+/**
+ * Gemini re-sends a function call across chunks as its arguments accumulate, so
+ * repeats have to be collapsed into one call.
+ *
+ * Two calls carrying different backend ids are distinct by definition, so the
+ * argument-shape heuristic only applies when the backend omitted ids. Matching
+ * on the tool name alone would discard genuine parallel calls — reading two
+ * files at once collapses to a single read as soon as one path is longer than
+ * the other.
+ */
+function upsertPendingTool(
+  pending: Map<string, PendingToolCall>,
+  call: PendingToolCall,
+): void {
+  const explicitId = call.id?.trim();
+  if (explicitId) {
+    const existing = pending.get(explicitId);
+    // Same id is definitionally the same call, so later chunks win outright —
+    // guarded only so a trailing empty-args repeat cannot erase what was built.
+    if (!existing || jsonSize(call.args) >= jsonSize(existing.args)) {
+      pending.set(explicitId, {
+        ...call,
+        id: explicitId,
+        thoughtSignature: call.thoughtSignature ?? existing?.thoughtSignature,
+      });
+    }
+    return;
+  }
+
+  const fingerprint = `anon:${call.name}:${JSON.stringify(call.args)}`;
+  for (const [key, existing] of pending) {
+    if (existing.id !== undefined || existing.name !== call.name) continue;
+    if (JSON.stringify(existing.args) === JSON.stringify(call.args)) return;
+    if (argsAreRicher(call.args, existing.args)) {
+      // Reuse the existing key so an accumulating call keeps its position
+      // relative to the other calls in the same response.
+      pending.set(key, {
+        ...call,
+        thoughtSignature: call.thoughtSignature ?? existing.thoughtSignature,
+      });
+      return;
+    }
+    if (argsAreRicher(existing.args, call.args)) return;
+  }
+  pending.set(fingerprint, call);
+}
 
 export function friendlyAntigravityError(status: number | undefined, text: string): string {
   const msg = redactSecrets(jsonOrTextError(text)).slice(0, 500);
@@ -43,7 +130,7 @@ export function friendlyAntigravityError(status: number | undefined, text: strin
     return `Antigravity denied this request (${msg}).`;
   }
   if (status === 404) {
-    return `This model is not available right now (${msg || "not found"}). Next: switch to gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, or gemini-3.1-pro.`;
+    return `This model is not available right now (${msg || "not found"}). Next: switch to gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, or gemini-3.1-pro.`;
   }
   if (status === 408) return "Antigravity request timed out. Next: retry.";
   if (status === 409) return "Antigravity conflict. Next: start a new session or retry.";
@@ -132,7 +219,7 @@ export async function* streamAntigravity(
           yield {
             type: "done",
             reason: StopReason.Aborted,
-            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            usage: { input: 0, output: 0, cacheRead: 0, total: 0 },
           };
           return;
         }
@@ -146,9 +233,14 @@ export async function* streamAntigravity(
         const errorText = await response.text().catch(() => "");
         lastError = new Error(friendlyAntigravityError(response.status, errorText));
         if (response.status === 404) {
-          // Break inner endpoint loop to try next model candidate if available
+          // Model missing on this family of endpoints — try the next runtime candidate
           break;
         }
+        if (response.status === 401) {
+          // Token is invalid on every host
+          break;
+        }
+        // 429/403 are often host-specific (daily vs prod quota pools). Try the next base URL.
         continue;
       }
 
@@ -165,15 +257,29 @@ export async function* streamAntigravity(
       let blockIndex = 0;
       let currentBlockType: "text" | "thinking" | null = null;
       let currentBlockContent = "";
+      let lastThoughtSignature: string | undefined;
+      let thinkingSent = "";
       let stopReason: StopReason = StopReason.Stop;
-      const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+      let sawToolCall = false;
+      const pendingTools = new Map<string, PendingToolCall>();
+      const usage = { input: 0, output: 0, cacheRead: 0, total: 0 };
 
       try {
-        while (true) {
+        let streamEnded = false;
+        while (!streamEnded) {
           const { done, value } = await reader.read();
-          if (done) break;
-          if (!(value instanceof Uint8Array)) continue;
-          buffer += decoder.decode(value, { stream: true });
+          if (done) {
+            streamEnded = true;
+            // Flush any partial multi-byte character, then terminate a final
+            // line the server left unterminated so it goes through the same
+            // parse path. Without this the last chunk — which carries
+            // usageMetadata and often the final text — is silently discarded.
+            buffer += decoder.decode();
+            if (scanStart < buffer.length && !buffer.endsWith("\n")) buffer += "\n";
+          } else {
+            if (!(value instanceof Uint8Array)) continue;
+            buffer += decoder.decode(value, { stream: true });
+          }
 
           let newlineIdx: number;
           while ((newlineIdx = buffer.indexOf("\n", scanStart)) !== -1) {
@@ -203,12 +309,18 @@ export async function* streamAntigravity(
             }
 
             const candidate = responseData.candidates?.[0];
-            if (candidate?.finishReason) {
-              if (candidate.finishReason === "MAX_TOKENS") stopReason = StopReason.Length;
-              else if (candidate.finishReason === "STOP") stopReason = StopReason.Stop;
+            if (candidate?.finishReason === "MAX_TOKENS") {
+              stopReason = StopReason.Length;
             }
 
             for (const part of candidate?.content?.parts || []) {
+              const partSignature =
+                (typeof part.thoughtSignature === "string" && part.thoughtSignature) ||
+                (typeof part.functionCall?.thought_signature === "string" &&
+                  part.functionCall.thought_signature) ||
+                undefined;
+              if (partSignature) lastThoughtSignature = partSignature;
+
               if (part.text !== undefined) {
                 const isThinking = part.thought === true;
                 const nextType = isThinking ? "thinking" : "text";
@@ -218,8 +330,14 @@ export async function* streamAntigravity(
                     yield { type: "text_end", contentIndex: blockIndex, content: currentBlockContent };
                     blockIndex++;
                   } else if (currentBlockType === "thinking") {
-                    yield { type: "thinking_end", contentIndex: blockIndex, content: currentBlockContent };
+                    yield {
+                      type: "thinking_end",
+                      contentIndex: blockIndex,
+                      content: currentBlockContent,
+                      thoughtSignature: lastThoughtSignature,
+                    };
                     blockIndex++;
+                    thinkingSent = "";
                   }
                   currentBlockType = nextType;
                   currentBlockContent = "";
@@ -229,11 +347,22 @@ export async function* streamAntigravity(
                   };
                 }
 
-                currentBlockContent += part.text;
+                let delta = part.text;
+                if (isThinking) {
+                  if (part.text.startsWith(thinkingSent)) {
+                    delta = part.text.slice(thinkingSent.length);
+                    thinkingSent = part.text;
+                  } else {
+                    thinkingSent += part.text;
+                  }
+                  if (!delta) continue;
+                }
+
+                currentBlockContent += delta;
                 yield {
                   type: isThinking ? "thinking_delta" : "text_delta",
                   contentIndex: blockIndex,
-                  delta: part.text,
+                  delta,
                 };
               }
 
@@ -244,37 +373,27 @@ export async function* streamAntigravity(
                   currentBlockType = null;
                   currentBlockContent = "";
                 } else if (currentBlockType === "thinking") {
-                  yield { type: "thinking_end", contentIndex: blockIndex, content: currentBlockContent };
+                  yield {
+                    type: "thinking_end",
+                    contentIndex: blockIndex,
+                    content: currentBlockContent,
+                    thoughtSignature: lastThoughtSignature,
+                  };
                   blockIndex++;
                   currentBlockType = null;
                   currentBlockContent = "";
                 }
 
-                const callId = part.functionCall.id || `call_${Date.now()}_${blockIndex}`;
-                const callName = part.functionCall.name;
-                const callArgs = part.functionCall.args || {};
+                const callName = part.functionCall.name?.trim();
+                if (!callName) continue;
 
-                yield {
-                  type: "toolcall_start",
-                  contentIndex: blockIndex,
-                  id: callId,
+                upsertPendingTool(pendingTools, {
+                  id: part.functionCall.id,
                   name: callName,
-                };
-                yield {
-                  type: "toolcall_delta",
-                  contentIndex: blockIndex,
-                  delta: JSON.stringify(callArgs),
-                };
-                yield {
-                  type: "toolcall_end",
-                  toolCall: {
-                    id: callId,
-                    name: callName,
-                    arguments: callArgs,
-                  },
-                };
-                blockIndex++;
-                stopReason = StopReason.ToolUse;
+                  args: part.functionCall.args || {},
+                  thoughtSignature: lastThoughtSignature,
+                });
+                sawToolCall = true;
               }
             }
           }
@@ -290,12 +409,47 @@ export async function* streamAntigravity(
         if (currentBlockType === "text") {
           yield { type: "text_end", contentIndex: blockIndex, content: currentBlockContent };
         } else if (currentBlockType === "thinking") {
-          yield { type: "thinking_end", contentIndex: blockIndex, content: currentBlockContent };
+          yield {
+            type: "thinking_end",
+            contentIndex: blockIndex,
+            content: currentBlockContent,
+            thoughtSignature: lastThoughtSignature,
+          };
+        }
+
+        let toolIndex = 0;
+        for (const tool of pendingTools.values()) {
+          // Calls the backend left unidentified still need a stable id for the
+          // AI SDK to correlate start/delta/end against.
+          const id = tool.id ?? `call_${tool.name}_${toolIndex}`;
+          toolIndex++;
+          yield {
+            type: "toolcall_start",
+            contentIndex: blockIndex,
+            id,
+            name: tool.name,
+          };
+          yield {
+            type: "toolcall_delta",
+            contentIndex: blockIndex,
+            id,
+            delta: JSON.stringify(tool.args),
+          };
+          yield {
+            type: "toolcall_end",
+            toolCall: {
+              id,
+              name: tool.name,
+              arguments: tool.args,
+              thoughtSignature: tool.thoughtSignature,
+            },
+          };
+          blockIndex++;
         }
 
         yield {
           type: "done",
-          reason: stopReason,
+          reason: sawToolCall || pendingTools.size > 0 ? StopReason.ToolUse : stopReason,
           usage,
         };
         return;
@@ -314,6 +468,16 @@ export async function* streamAntigravity(
           error: { errorMessage: redactSecrets(message) },
         };
         return;
+      } finally {
+        // Also runs when the consumer abandons the generator mid-stream, which
+        // is the common case on cancel — without it the socket stays checked
+        // out of the pool until GC.
+        try {
+          reader.releaseLock();
+        } catch {
+          // Already released.
+        }
+        void response.body?.cancel().catch(() => {});
       }
     }
   }

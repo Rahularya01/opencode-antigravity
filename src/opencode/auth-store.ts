@@ -1,8 +1,14 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { getAntigravityAccessTokenFromEnv, refreshAntigravityToken } from "../auth/oauth.js";
+import {
+  getAntigravityAccessTokenFromEnv,
+  refreshAntigravityAccessToken,
+} from "../auth/oauth.js";
 import { ANTIGRAVITY_PROVIDER_ID } from "./plugin-id.js";
+
+/** Fallback cache window for API keys and tokens stored without an expiry. */
+const UNDATED_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 type StoredAuth =
   | { type: "oauth"; access?: string; refresh?: string; expires?: number }
@@ -46,22 +52,43 @@ export function parseAuthFile(raw: string): StoredAuth | undefined {
   return undefined;
 }
 
-export async function tokenFromStoredAuth(auth: StoredAuth): Promise<string | undefined> {
+export type ResolvedToken = { token: string; expires?: number };
+
+export async function tokenFromStoredAuth(
+  auth: StoredAuth,
+): Promise<ResolvedToken | undefined> {
   if (auth.type === "api") {
-    return auth.key;
+    return auth.key ? { token: auth.key } : undefined;
   }
   if (auth.access && (auth.expires === undefined || Date.now() < auth.expires - 30_000)) {
-    return auth.access;
+    return { token: auth.access, expires: auth.expires };
   }
   if (auth.refresh) {
     try {
-      const refreshed = await refreshAntigravityToken(auth.refresh);
-      return refreshed.access;
+      // Deliberately the discovery-free refresh: this path only needs a usable
+      // access token, and project lookup costs an extra round trip per call.
+      const refreshed = await refreshAntigravityAccessToken(auth.refresh);
+      return { token: refreshed.access, expires: refreshed.expires };
     } catch {
-      return auth.access;
+      return auth.access ? { token: auth.access, expires: auth.expires } : undefined;
     }
   }
-  return auth.access;
+  return auth.access ? { token: auth.access, expires: auth.expires } : undefined;
+}
+
+/**
+ * Resolved tokens are cached for the life of the process. This runs on every
+ * model request, and re-reading auth.json — then refreshing against Google
+ * because the file still holds the expired token this process already
+ * replaced — would issue a fresh refresh per request.
+ */
+let cachedToken: { token: string; expiresAt: number } | undefined;
+let inflight: Promise<string | undefined> | undefined;
+
+/** Discard the cached token (used by tests and after an explicit re-login). */
+export function resetCatalogAccessTokenCache(): void {
+  cachedToken = undefined;
+  inflight = undefined;
 }
 
 /** Resolve an Antigravity token for catalog discovery during OpenCode `config()` (before getAuth). */
@@ -69,15 +96,32 @@ export async function resolveCatalogAccessToken(): Promise<string | undefined> {
   const env = getAntigravityAccessTokenFromEnv();
   if (env) return env;
 
-  try {
-    const stored = parseAuthFile(readFileSync(opencodeAuthPath(), "utf8"));
-    if (stored) {
-      const token = await tokenFromStoredAuth(stored);
-      if (token) return token;
-    }
-  } catch {
-    // Auth file may not exist yet on initial install
-  }
+  if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.token;
+  // Concurrent requests at startup should share one refresh, not race several.
+  if (inflight) return inflight;
 
-  return undefined;
+  inflight = (async () => {
+    try {
+      const stored = parseAuthFile(readFileSync(opencodeAuthPath(), "utf8"));
+      if (!stored) return undefined;
+      const resolved = await tokenFromStoredAuth(stored);
+      if (!resolved) return undefined;
+      cachedToken = {
+        token: resolved.token,
+        // Re-check shortly before expiry; cap the window for tokens that
+        // carry no expiry of their own.
+        expiresAt: resolved.expires
+          ? Math.max(Date.now(), resolved.expires - 60_000)
+          : Date.now() + UNDATED_TOKEN_TTL_MS,
+      };
+      return resolved.token;
+    } catch {
+      // Auth file may not exist yet on initial install
+      return undefined;
+    } finally {
+      inflight = undefined;
+    }
+  })();
+
+  return inflight;
 }

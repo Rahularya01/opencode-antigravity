@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { defaultProjectId, loadCodeAssist } from "../client/client.js";
+import { isGeneratedProjectId, loadCodeAssist } from "../client/client.js";
 import { escapeHtml, antigravityEnv } from "../utils/util.js";
 import { resolveCallbackHost, redactSecrets } from "../utils/security.js";
 import type { AntigravityOAuthCredentials, CallbackServer } from "../types/types.js";
@@ -250,7 +250,7 @@ export async function generateAntigravityAuthParams(): Promise<{
         refresh: tokenData.refresh_token,
         access: tokenData.access_token,
         expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
-        projectId: discoveredProject || defaultProjectId(email || "antigravity-default"),
+        ...(discoveredProject ? { projectId: discoveredProject } : {}),
         email,
       };
     } finally {
@@ -301,13 +301,15 @@ export async function refreshAntigravityToken(
   existingProjectId?: string,
 ): Promise<AntigravityOAuthCredentials> {
   const refreshed = await refreshAntigravityAccessToken(refreshToken);
-  const discoveredProject = existingProjectId
-    ? undefined
-    : await loadCodeAssist(refreshed.access);
+  const existing =
+    existingProjectId?.trim() && !isGeneratedProjectId(existingProjectId.trim())
+      ? existingProjectId.trim()
+      : undefined;
+  const discoveredProject = existing ? undefined : await loadCodeAssist(refreshed.access);
 
   return {
     ...refreshed,
-    projectId: existingProjectId || discoveredProject || defaultProjectId("antigravity-default"),
+    ...(existing || discoveredProject ? { projectId: existing || discoveredProject } : {}),
   };
 }
 

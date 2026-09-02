@@ -1,8 +1,14 @@
 import type {
   LanguageModelV3CallOptions,
   LanguageModelV3Prompt,
+  SharedV3Warning,
 } from "@ai-sdk/provider";
-import { GeminiRole, GeminiToolCallingMode } from "../types/enums.js";
+import {
+  AntigravityRequestType,
+  AntigravityUserAgent,
+  GeminiRole,
+  GeminiToolCallingMode,
+} from "../types/enums.js";
 import type {
   AntigravityGenerateRequest,
   GeminiContent,
@@ -18,13 +24,56 @@ import {
   getMaxOutputTokens,
   getThinkingConfig,
 } from "../models/models.js";
-import { antigravityRequestEnvelope, isRecord, sanitizeText } from "../utils/util.js";
+import { antigravityRequestEnvelope, asString, isRecord, sanitizeText } from "../utils/util.js";
+
+export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
 
 const DEFAULT_SYSTEM_INSTRUCTION =
-  "You are Antigravity, an expert AI coding assistant. You help users with software engineering, " +
-  "code editing, debugging, and terminal workflows. Be concise, practical, and tool-aware.";
+  "You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding. " +
+  "You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n" +
+  "**Absolute paths only**\n" +
+  "Do the work yourself with read, glob, grep, edit, and bash. Do not call the task tool or spawn a nested Build/Plan agent.";
+
+const AGENT_EFFICIENCY_INSTRUCTION =
+  "TOOL USE & EFFICIENCY GUIDELINES:\n" +
+  "- When inspecting files with the `read` tool, read complete files or large relevant sections. Do NOT paginate or slice files into small 50-100 line chunks using limit/offset unless the file is massive (>1000 lines). Do not re-read files you have already viewed.\n" +
+  "- Execute independent tool calls in parallel within a single turn whenever possible rather than in separate sequential turns.";
 
 let toolCallCounter = 0;
+
+function thoughtSignatureFromMeta(part: unknown): string | undefined {
+  if (!isRecord(part)) return undefined;
+  const meta = isRecord(part.providerMetadata)
+    ? part.providerMetadata
+    : isRecord(part.metadata)
+      ? part.metadata
+      : undefined;
+  if (!meta) return undefined;
+  for (const key of ["google", "antigravity", "gemini"]) {
+    const inner = meta[key];
+    if (isRecord(inner) && typeof inner.thoughtSignature === "string" && inner.thoughtSignature.trim()) {
+      return inner.thoughtSignature.trim();
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Tool-call arguments replayed out of history are not guaranteed to parse — a
+ * truncated stream or a provider that emitted invalid JSON both land here. A
+ * throw would take down every later turn in the session that replays the same
+ * message, so degrade to empty arguments instead.
+ */
+function parseToolCallInput(input: unknown): Record<string, unknown> {
+  if (isRecord(input)) return input;
+  if (typeof input !== "string" || !input.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(input);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 function sanitizeToolCallId(id: string, fallbackName?: string): string {
   const cleaned = id.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -64,43 +113,83 @@ function parseImageData(raw: string | Uint8Array, explicitMime?: string): { data
   return undefined;
 }
 
+/**
+ * Gemini has no notion of `$ref`, so a schema that reaches the backend with one
+ * still in it is rejected outright. Recursive schemas cannot be expressed at
+ * all, so a self-referential definition degrades to an untyped stub.
+ */
+function cycleStub(target: unknown): Record<string, unknown> {
+  const type = isRecord(target) && typeof target.type === "string" ? target.type : "object";
+  const description = isRecord(target) ? asString(target.description) : undefined;
+  return { type, ...(description ? { description } : {}) };
+}
+
+/**
+ * Inline every `$ref` against the definitions in scope.
+ *
+ * `active` holds only the definitions currently being expanded and entries are
+ * removed on the way back out. Marking nodes as seen for the whole traversal
+ * instead would leave the second and later uses of a definition un-expanded:
+ * `$defs` is walked before `properties`, so every definition would already be
+ * marked by the time the refs pointing at it were resolved, and any nested
+ * `$ref` inside them would ship as-is.
+ */
 function dereferenceSchema(
   schema: unknown,
   rootDefs: Record<string, unknown> = {},
-  visited = new Set<unknown>(),
+  active = new Set<unknown>(),
 ): unknown {
   if (!schema || typeof schema !== "object") return schema;
   if (Array.isArray(schema)) {
-    return schema.map((item) => dereferenceSchema(item, rootDefs, visited));
+    return schema.map((item) => dereferenceSchema(item, rootDefs, active));
   }
 
   const s = schema as Record<string, unknown>;
-  if (visited.has(s)) return s;
-  visited.add(s);
 
   const defs: Record<string, unknown> = { ...rootDefs };
   if (isRecord(s.$defs)) Object.assign(defs, s.$defs);
   if (isRecord(s.definitions)) Object.assign(defs, s.definitions);
 
   if (typeof s.$ref === "string") {
-    const ref = s.$ref;
-    const match = ref.match(/^#\/(?:\$defs|definitions)\/(.+)$/);
-    if (match && match[1] && defs[match[1]] !== undefined) {
-      const resolved = dereferenceSchema(defs[match[1]], defs, visited);
-      if (isRecord(resolved)) {
-        const { $ref: _, ...rest } = s;
-        const restCleaned = dereferenceSchema(rest, defs, visited);
-        return isRecord(restCleaned) ? { ...resolved, ...restCleaned } : resolved;
-      }
-      return resolved;
+    const match = s.$ref.match(/^#\/(?:\$defs|definitions)\/(.+)$/);
+    const target = match?.[1] ? defs[match[1]] : undefined;
+    if (target !== undefined) {
+      // Already being expanded further up the stack: the definition refers back
+      // to itself, which has no Gemini equivalent.
+      if (active.has(target)) return cycleStub(target);
+      // The recursive call marks `target` active for its own subtree, so it
+      // must not be marked here as well — that would read as a self-reference.
+      const resolved = dereferenceSchema(target, defs, active);
+      if (!isRecord(resolved)) return resolved;
+      // Keys sitting alongside the `$ref` (description, etc.) win over the target's.
+      const { $ref: _ref, ...rest } = s;
+      const restCleaned = dereferenceSchema(rest, defs, active);
+      return isRecord(restCleaned) ? { ...resolved, ...restCleaned } : resolved;
     }
+
+    // Pointer we cannot resolve — an external ref, or a definition that never
+    // made it into scope. Drop it: a `$ref` the backend rejects is worse than
+    // an under-specified argument.
+    const { $ref: _unresolved, ...rest } = s;
+    const restCleaned = dereferenceSchema(rest, defs, active);
+    const kept = isRecord(restCleaned) ? restCleaned : {};
+    return kept.type ? kept : { ...kept, type: "object" };
   }
 
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(s)) {
-    out[key] = dereferenceSchema(value, defs, visited);
+  if (active.has(s)) return cycleStub(s);
+  active.add(s);
+  try {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(s)) {
+      // Definition blocks are inlined at their use sites and stripped later;
+      // walking them here only risks emitting stubs for unused definitions.
+      if (key === "$defs" || key === "definitions") continue;
+      out[key] = dereferenceSchema(value, defs, active);
+    }
+    return out;
+  } finally {
+    active.delete(s);
   }
-  return out;
 }
 
 function ensureRootObjectSchema(schema: unknown): Record<string, unknown> {
@@ -253,6 +342,7 @@ export function convertPromptToContents(
 
     if (message.role === "assistant") {
       const parts: GeminiPart[] = [];
+      let firstFunctionCall = true;
       for (const part of message.content) {
         if (part.type === "text") {
           if (part.text && part.text.trim()) {
@@ -260,22 +350,28 @@ export function convertPromptToContents(
           }
         } else if (part.type === "reasoning") {
           if (part.text && part.text.trim()) {
-            parts.push({ thought: true, text: sanitizeText(part.text) });
+            const thoughtSignature = thoughtSignatureFromMeta(part);
+            parts.push({
+              thought: true,
+              text: sanitizeText(part.text),
+              ...(thoughtSignature ? { thoughtSignature } : {}),
+            });
           }
         } else if (part.type === "tool-call") {
-          const args =
-            typeof part.input === "string"
-              ? (JSON.parse(part.input || "{}") as Record<string, unknown>)
-              : ((part.input ?? {}) as Record<string, unknown>);
+          const args = parseToolCallInput(part.input);
           const callId = toolCallIdNeeded(modelId, runtimeModel)
             ? sanitizeToolCallId(part.toolCallId, part.toolName)
             : part.toolCallId;
+          const thoughtSignature =
+            thoughtSignatureFromMeta(part) ||
+            SKIP_THOUGHT_SIGNATURE;
           parts.push({
             functionCall: {
               name: part.toolName,
               args,
               ...(callId ? { id: callId } : {}),
             },
+            ...(thoughtSignature ? { thoughtSignature } : {}),
           });
         } else if (part.type === "tool-result") {
           // If assistant turn had parts before tool result, append assistant turn
@@ -391,6 +487,59 @@ export function convertToolsToGemini(
   return functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined;
 }
 
+/**
+ * `VALIDATED` (rather than `AUTO`) is the default the backend is tuned for: it
+ * checks generated arguments against the declared schema before returning them.
+ */
+function toolConfigFor(
+  toolChoice: LanguageModelV3CallOptions["toolChoice"],
+): NonNullable<GeminiRequestBody["toolConfig"]> {
+  switch (toolChoice?.type) {
+    case "none":
+      return { functionCallingConfig: { mode: GeminiToolCallingMode.None } };
+    case "required":
+      return { functionCallingConfig: { mode: GeminiToolCallingMode.Any } };
+    case "tool":
+      return {
+        functionCallingConfig: {
+          mode: GeminiToolCallingMode.Any,
+          allowedFunctionNames: [toolChoice.toolName],
+        },
+      };
+    default:
+      return { functionCallingConfig: { mode: GeminiToolCallingMode.Validated } };
+  }
+}
+
+/**
+ * Call options the Antigravity wire format has nowhere to put. Surfacing them
+ * as warnings is how the AI SDK expects a provider to report silent drops.
+ */
+export function unsupportedSettingWarnings(
+  callOptions: LanguageModelV3CallOptions,
+): SharedV3Warning[] {
+  const warnings: SharedV3Warning[] = [];
+  const unsupported = (feature: string, details: string) =>
+    warnings.push({ type: "unsupported", feature, details });
+
+  if (callOptions.seed !== undefined) {
+    unsupported("seed", "Antigravity does not accept a sampling seed; output is not reproducible.");
+  }
+  if (callOptions.presencePenalty !== undefined) {
+    unsupported("presencePenalty", "Antigravity does not accept presence penalties.");
+  }
+  if (callOptions.frequencyPenalty !== undefined) {
+    unsupported("frequencyPenalty", "Antigravity does not accept frequency penalties.");
+  }
+  if (callOptions.responseFormat && callOptions.responseFormat.type !== "text") {
+    unsupported(
+      "responseFormat",
+      "Structured output is not supported; request JSON in the prompt or use a tool instead.",
+    );
+  }
+  return warnings;
+}
+
 export function buildAntigravityRequestBody(opts: {
   modelId: string;
   runtimeModel: string;
@@ -414,6 +563,10 @@ export function buildAntigravityRequestBody(opts: {
     maxOutputTokens: getMaxOutputTokens(runtimeModel, callOptions.maxOutputTokens),
     temperature: callOptions.temperature,
     topP: callOptions.topP,
+    ...(callOptions.topK !== undefined ? { topK: callOptions.topK } : {}),
+    ...(callOptions.stopSequences?.length
+      ? { stopSequences: callOptions.stopSequences }
+      : {}),
   };
 
   const thinkingWire = getThinkingConfig(modelId, reasoningEffort);
@@ -427,7 +580,8 @@ export function buildAntigravityRequestBody(opts: {
     };
   }
 
-  const systemText = systemInstruction || DEFAULT_SYSTEM_INSTRUCTION;
+  const baseInstruction = systemInstruction || DEFAULT_SYSTEM_INSTRUCTION;
+  const systemText = `${baseInstruction}\n\n${AGENT_EFFICIENCY_INSTRUCTION}`;
 
   const request: GeminiRequestBody = {
     contents,
@@ -441,27 +595,24 @@ export function buildAntigravityRequestBody(opts: {
   const geminiTools = convertToolsToGemini(callOptions.tools, useLegacy);
   if (geminiTools) {
     request.tools = geminiTools;
-    request.toolConfig = {
-      functionCallingConfig: {
-        mode: GeminiToolCallingMode.Validated,
-      },
-    };
+    request.toolConfig = toolConfigFor(callOptions.toolChoice);
   } else if (isClaude) {
-    request.toolConfig = {
-      functionCallingConfig: { mode: GeminiToolCallingMode.Validated },
-    };
+    request.toolConfig = toolConfigFor(callOptions.toolChoice);
   }
 
-  const envelope = antigravityRequestEnvelope(runtimeModel, isClaude);
-  request.sessionId = sessionId || envelope.sessionId;
+  const envelope = antigravityRequestEnvelope(runtimeModel, isClaude, {
+    sessionId,
+    prompt: callOptions.prompt,
+  });
+  request.sessionId = envelope.sessionId;
   request.labels = envelope.labels;
 
   return {
     project: projectId,
     model: runtimeModel,
     request,
-    requestType: "AGENT",
-    userAgent: "antigravity",
+    requestType: AntigravityRequestType.Agent,
+    userAgent: AntigravityUserAgent.Antigravity,
     requestId: envelope.requestId,
   };
 }
