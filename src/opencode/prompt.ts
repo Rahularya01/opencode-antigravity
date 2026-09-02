@@ -13,12 +13,37 @@ export function sessionIdFromHeaders(
 }
 
 export function reasoningFromCall(options: LanguageModelV3CallOptions): string | undefined {
-  const antigravity = options.providerOptions?.antigravity;
-  if (antigravity && typeof antigravity === "object" && !Array.isArray(antigravity)) {
-    const effort =
-      (antigravity as Record<string, unknown>).effort ??
-      (antigravity as Record<string, unknown>).reasoningEffort;
-    if (typeof effort === "string" && effort.trim()) return effort.trim();
+  const anyOpts = options as Record<string, unknown>;
+
+  // 1. Direct top-level fields (supported by AI SDK / OpenCode variants)
+  if (typeof anyOpts.reasoningEffort === "string" && anyOpts.reasoningEffort.trim()) {
+    return anyOpts.reasoningEffort.trim();
   }
+  if (typeof anyOpts.variant === "string" && anyOpts.variant.trim()) {
+    return anyOpts.variant.trim();
+  }
+
+  // 2. providerOptions under various keys (antigravity, google, gemini, etc.)
+  const providerOpts = options.providerOptions;
+  if (providerOpts && typeof providerOpts === "object" && !Array.isArray(providerOpts)) {
+    for (const key of Object.keys(providerOpts)) {
+      const entry = (providerOpts as Record<string, unknown>)[key];
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        const record = entry as Record<string, unknown>;
+        const effort = record.effort ?? record.reasoningEffort ?? record.variant;
+        if (typeof effort === "string" && effort.trim()) return effort.trim();
+      }
+    }
+  }
+
+  // 3. Headers
+  const headers = options.headers;
+  if (headers) {
+    for (const k of ["x-opencode-variant", "x-variant", "x-reasoning-effort"]) {
+      const val = headers[k] ?? headers[k.toLowerCase()];
+      if (val?.trim()) return val.trim();
+    }
+  }
+
   return undefined;
 }
