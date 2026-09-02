@@ -10,7 +10,17 @@ It communicates directly with Google's Cloud Code Assist endpoints (`streamGener
 
 ## Install
 
-In your `opencode.json` (or `~/.config/opencode/opencode.json`):
+### Global Installation (Recommended)
+
+To install globally for OpenCode across all projects:
+
+```bash
+npm install -g --ignore-scripts @rahularya01/opencode-antigravity
+# or
+bun add -g --ignore-scripts @rahularya01/opencode-antigravity
+```
+
+Then add the plugin to your global OpenCode configuration (`~/.config/opencode/opencode.json`):
 
 ```json
 {
@@ -19,12 +29,25 @@ In your `opencode.json` (or `~/.config/opencode/opencode.json`):
 }
 ```
 
-OpenCode will automatically download and install the package from npm at startup. Alternatively, you can install it using your package manager:
+### Project-level / Automatic Install
+
+Alternatively, add the plugin to your project's `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@rahularya01/opencode-antigravity"]
+}
+```
+
+OpenCode will automatically download and install the package from npm at startup.
+
+You can also install locally in a project using:
 
 ```bash
-npm install @rahularya01/opencode-antigravity
+npm install --ignore-scripts @rahularya01/opencode-antigravity
 # or
-bun add @rahularya01/opencode-antigravity
+bun add --ignore-scripts @rahularya01/opencode-antigravity
 ```
 
 ```json
