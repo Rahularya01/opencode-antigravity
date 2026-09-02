@@ -35,9 +35,11 @@ const DEFAULT_SYSTEM_INSTRUCTION =
   "Do the work yourself with read, glob, grep, edit, and bash. Do not call the task tool or spawn a nested Build/Plan agent.";
 
 const AGENT_EFFICIENCY_INSTRUCTION =
-  "TOOL USE & EFFICIENCY GUIDELINES:\n" +
-  "- When inspecting files with the `read` tool, read complete files or large relevant sections. Do NOT paginate or slice files into small 50-100 line chunks using limit/offset unless the file is massive (>1000 lines). Do not re-read files you have already viewed.\n" +
-  "- Execute independent tool calls in parallel within a single turn whenever possible rather than in separate sequential turns.";
+  "CRITICAL BEHAVIORAL & EXECUTION GUIDELINES:\n" +
+  "1. NEVER END A TURN SILENTLY: You must ALWAYS provide a visible text response to the user. Never end your turn with internal thoughts alone. After tool executions or inspections, explain clearly what you completed and what the next steps are.\n" +
+  "2. PERSISTENT TASK EXECUTION: If the user asked you to implement code or perform a multi-step task, do not stop prematurely after one or two file operations. Continue calling the next tools needed until the implementation is complete.\n" +
+  "3. EFFICIENT INSPECTIONS: When using `read`, inspect full files or large sections. Do NOT paginate in 50-100 line chunks with offset/limit unless the file exceeds 1,000 lines. Never re-read files you already viewed.\n" +
+  "4. PARALLELIZE INDEPENDENT TOOLS: Execute independent tool calls (such as reading or writing multiple files) in parallel in a single turn instead of serializing across separate turns.";
 
 let toolCallCounter = 0;
 

@@ -145,6 +145,33 @@ export function friendlyAntigravityError(status: number | undefined, text: strin
   return msg;
 }
 
+function extractThoughtSummary(thinking: string): string {
+  if (!thinking || !thinking.trim()) {
+    return "Completed previous operations.";
+  }
+  const clean = thinking.replace(/<[^>]+>/g, " ").trim();
+  const paragraphs = clean
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(
+      (p) =>
+        p.length > 25 &&
+        !p.startsWith("```") &&
+        !p.startsWith("{") &&
+        !p.startsWith("[") &&
+        !p.startsWith("const ") &&
+        !p.startsWith("import "),
+    );
+
+  if (paragraphs.length > 0) {
+    const last = paragraphs[paragraphs.length - 1]!;
+    const cleaned = last.replace(/^(I need to|I will|Let me|Thinking about|Analyzing)\s+/i, "");
+    const trimmed = cleaned.length > 600 ? `${cleaned.slice(0, 597)}...` : cleaned;
+    return trimmed;
+  }
+  return "Completed previous operations.";
+}
+
 export interface StreamAntigravityOptions {
   accessToken: string;
   projectId?: string;
@@ -259,6 +286,8 @@ export async function* streamAntigravity(
       let currentBlockContent = "";
       let lastThoughtSignature: string | undefined;
       let thinkingSent = "";
+      let totalVisibleTextChars = 0;
+      let lastThinkingContent = "";
       let stopReason: StopReason = StopReason.Stop;
       let sawToolCall = false;
       const pendingTools = new Map<string, PendingToolCall>();
@@ -323,6 +352,13 @@ export async function* streamAntigravity(
 
               if (part.text !== undefined) {
                 const isThinking = part.thought === true;
+
+                // An empty text part accompanying thoughtSignature at the end of a chunk
+                // should not prematurely transition the block from thinking to text.
+                if (!isThinking && part.text === "" && currentBlockType === "thinking") {
+                  continue;
+                }
+
                 const nextType = isThinking ? "thinking" : "text";
 
                 if (currentBlockType !== nextType) {
@@ -356,6 +392,9 @@ export async function* streamAntigravity(
                     thinkingSent += part.text;
                   }
                   if (!delta) continue;
+                  lastThinkingContent += delta;
+                } else {
+                  totalVisibleTextChars += delta.length;
                 }
 
                 currentBlockContent += delta;
@@ -408,6 +447,9 @@ export async function* streamAntigravity(
         // Close open block if any
         if (currentBlockType === "text") {
           yield { type: "text_end", contentIndex: blockIndex, content: currentBlockContent };
+          blockIndex++;
+          currentBlockType = null;
+          currentBlockContent = "";
         } else if (currentBlockType === "thinking") {
           yield {
             type: "thinking_end",
@@ -415,6 +457,21 @@ export async function* streamAntigravity(
             content: currentBlockContent,
             thoughtSignature: lastThoughtSignature,
           };
+          blockIndex++;
+          currentBlockType = null;
+          currentBlockContent = "";
+        }
+
+        // If the model finished without emitting any visible text and without calling any tools
+        // (common when thinking models conclude their thoughts without writing a final user-facing response),
+        // synthesize a concise summary from the model's thoughts so OpenCode and the user receive a proper
+        // response rather than an abrupt, empty stop.
+        if (!sawToolCall && pendingTools.size === 0 && totalVisibleTextChars === 0) {
+          const fallbackText = extractThoughtSummary(lastThinkingContent);
+          yield { type: "text_start", contentIndex: blockIndex };
+          yield { type: "text_delta", contentIndex: blockIndex, delta: fallbackText };
+          yield { type: "text_end", contentIndex: blockIndex, content: fallbackText };
+          blockIndex++;
         }
 
         let toolIndex = 0;

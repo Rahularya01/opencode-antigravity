@@ -5,7 +5,7 @@ import {
   buildAntigravityRequestBody,
   unsupportedSettingWarnings,
 } from "../src/stream/transform.js";
-import { friendlyAntigravityError } from "../src/stream/stream.js";
+import { friendlyAntigravityError, streamAntigravity } from "../src/stream/stream.js";
 import { GeminiRole } from "../src/types/enums.js";
 
 describe("Antigravity Stream & Transform", () => {
@@ -294,5 +294,38 @@ describe("Antigravity Stream & Transform", () => {
     );
     expect(features).toContain("seed");
     expect(features).toContain("frequencyPenalty");
+  });
+
+  it("synthesizes a fallback response when the model emits only thinking and zero text without tool calls", async () => {
+    const ssePayload = [
+      'data: {"response":{"candidates":[{"content":{"parts":[{"thought":true,"text":"Thinking through the implementation of the bridge file."}]}}]}}\n\n',
+      'data: {"response":{"candidates":[{"finishReason":"STOP","content":{"parts":[{"thoughtSignature":"sig-123","text":""}]}}]}}\n\n',
+      'data: [DONE]\n\n',
+    ].join("");
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(ssePayload, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const events: any[] = [];
+      for await (const event of streamAntigravity(
+        "gemini-3.8-flash",
+        { prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] } as any,
+        { accessToken: "token", projectId: "p" },
+      )) {
+        events.push(event);
+      }
+
+      const textDeltas = events.filter((e) => e.type === "text_delta");
+      expect(textDeltas.length).toBeGreaterThan(0);
+      expect(textDeltas[0].delta).toContain("Thinking through the implementation");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
