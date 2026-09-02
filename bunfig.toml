@@ -1,0 +1,10 @@
+[install]
+# Always record exact resolved versions in package.json on `bun add`/`bun update`,
+# instead of semver ranges — makes every dependency bump an explicit, reviewable diff.
+exact = true
+
+# None of our current dependencies need install-time lifecycle scripts. Disabling
+# them by default blocks a compromised/typosquatted package from running arbitrary
+# code at install time; re-enable per-package via `trustedDependencies` if a future
+# dependency legitimately needs one.
+ignoreScripts = true

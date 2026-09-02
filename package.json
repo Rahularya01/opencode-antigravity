@@ -1,0 +1,48 @@
+{
+  "name": "opencode-antigravity",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that provides Google Antigravity / Cloud Code Assist models (Gemini, Claude, GPT-OSS) to OpenCode via an AI SDK LanguageModelV3 provider.",
+  "author": "Rahul Arya",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/plugin.js",
+  "exports": {
+    ".": "./dist/plugin.js",
+    "./plugin": "./dist/plugin.js",
+    "./sdk": "./dist/sdk.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "antigravity",
+    "google",
+    "gemini",
+    "claude",
+    "ai-sdk"
+  ],
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "test": "bun test --timeout=15000",
+    "typecheck": "tsc --noEmit",
+    "ci": "bun install --frozen-lockfile && bun run typecheck && bun run test && bun run build"
+  },
+  "peerDependencies": {
+    "@ai-sdk/provider": "^3.0.0",
+    "@opencode-ai/plugin": "^1.0.0"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "3.0.15",
+    "@opencode-ai/plugin": "1.18.26",
+    "@types/bun": "1.4.0",
+    "typescript": "5.9.3"
+  }
+}

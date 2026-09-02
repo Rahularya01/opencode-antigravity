@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Keep the bun-managed dependency tree patched; PRs land individually so
+  # each version bump is a small, reviewable diff against a pinned lockfile.
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # Keep third-party GitHub Actions patched too — an Action is just as much
+  # a supply-chain dependency as an npm package.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
