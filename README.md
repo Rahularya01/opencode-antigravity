@@ -15,11 +15,17 @@ In your `opencode.json` (or `~/.config/opencode/opencode.json`):
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-antigravity"]
+  "plugin": ["@rahularya01/opencode-antigravity"]
 }
 ```
 
-OpenCode installs npm plugins at startup. For a local checkout:
+OpenCode will automatically download and install the package from npm at startup. Alternatively, you can install it using your package manager:
+
+```bash
+npm install @rahularya01/opencode-antigravity
+# or
+bun add @rahularya01/opencode-antigravity
+```
 
 ```json
 {
