@@ -95,6 +95,20 @@ Pick a model using OpenCode's model selector or CLI:
 | `antigravity/claude-opus-4-6` | Claude Opus 4.6 | Yes (Thinking) | 250,000 | 64,000 |
 | `antigravity/gpt-oss-120b` | GPT-OSS 120B | Yes (Medium) | 131,072 | 32,768 |
 
+After sign-in, the plugin refreshes this list from `fetchAvailableModels` and adds newly advertised families without a plugin update. The table above is the conservative startup catalog.
+
+---
+
+## Tools and commands
+
+| Tool / command | Description |
+| --- | --- |
+| `generate_image` / `/antigravity-image` | Generate an image via Antigravity. Saves under `.opencode/generated-images/` unless `path` is set. Optional `aspectRatio` (e.g. `16:9`) and `model`. |
+| `antigravity_usage` / `/antigravity-usage` | Show shared quota pools and reset times. Free-tier accounts may not get the aggregate summary; per-model remaining % still works. |
+| `antigravity_models` / `/antigravity-models` | List runtime models with remaining shared-pool quota. |
+
+Quota percentages are pool-shared, not a private per-model budget.
+
 ---
 
 ## How It Fits OpenCode

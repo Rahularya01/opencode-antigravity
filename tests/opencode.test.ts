@@ -7,12 +7,14 @@ import {
 } from "../src/opencode/plugin.js";
 import { ANTIGRAVITY_PROVIDER_ID } from "../src/opencode/plugin-id.js";
 import { reasoningFromCall } from "../src/opencode/prompt.js";
+import { resetDiscoveredRouting } from "../src/models/models.js";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   mock.restore();
+  resetDiscoveredRouting();
 });
 
 describe("reasoningFromCall", () => {
@@ -115,6 +117,53 @@ describe("OpenCode Plugin & SDK", () => {
 
     const apiMethod = plugin.auth?.methods.find((m) => m.type === "api");
     expect(apiMethod).toBeDefined();
+  });
+
+  it("registers usage/image tools, commands, and live provider.models", async () => {
+    const pluginFactory = createAntigravityPlugin("file:///test/sdk.js");
+    const plugin = await pluginFactory({
+      client: {} as never,
+      directory: "/workspace",
+      serverUrl: new URL("http://localhost:4096"),
+    } as any);
+
+    expect(plugin.tool?.generate_image).toBeDefined();
+    expect(plugin.tool?.antigravity_usage).toBeDefined();
+    expect(plugin.tool?.antigravity_models).toBeDefined();
+    expect(plugin.provider?.id).toBe(ANTIGRAVITY_PROVIDER_ID);
+
+    const cfg: Record<string, any> = {};
+    await plugin.config?.(cfg);
+    expect(cfg.command["antigravity-usage"]).toBeDefined();
+    expect(cfg.command["antigravity-models"]).toBeDefined();
+    expect(cfg.command["antigravity-image"]).toBeDefined();
+
+    globalThis.fetch = mock(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("loadCodeAssist")) {
+        return new Response(JSON.stringify({ cloudaicompanionProject: "proj-1" }), { status: 200 });
+      }
+      if (url.includes("fetchAvailableModels")) {
+        return new Response(
+          JSON.stringify({
+            models: {
+              "gemini-4-flash-high": {
+                displayName: "Gemini 4 Flash (High)",
+                supportsThinking: true,
+              },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("nope", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const live = await plugin.provider!.models!({} as never, {
+      auth: { type: "oauth", access: "ya29.test", refresh: "1/x", expires: Date.now() + 60_000 },
+    });
+    expect(live["gemini-4-flash"]).toBeDefined();
+    expect(live["gemini-3.8-flash"]).toBeDefined();
   });
 
   it("keeps tool-input stream ids aligned so OpenCode does not show 'unknown'", async () => {

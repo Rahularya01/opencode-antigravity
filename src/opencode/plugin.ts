@@ -5,7 +5,10 @@ import {
 } from "../auth/oauth.js";
 import { isGeneratedProjectId, ANTIGRAVITY_MANAGED_PROJECT_ID } from "../client/client.js";
 import { modelsToOpenCodeConfig } from "../models/catalog.js";
+import { loadLiveOpenCodeModels } from "../models/discovery.js";
 import { ANTIGRAVITY_PROVIDER_ID } from "./plugin-id.js";
+import { resolveCatalogAccessToken } from "./auth-store.js";
+import { createAntigravityTools } from "./tools.js";
 
 /**
  * `config()` runs on OpenCode startup, before auth is resolved, so there is no
@@ -15,6 +18,30 @@ import { ANTIGRAVITY_PROVIDER_ID } from "./plugin-id.js";
  */
 function loadModels(): Record<string, unknown> {
   return modelsToOpenCodeConfig();
+}
+
+function accessTokenFromAuth(auth: {
+  type?: string;
+  access?: string;
+  key?: string;
+  token?: string;
+} | undefined): string | undefined {
+  if (!auth) return undefined;
+  if (auth.type === "oauth" && auth.access?.trim()) return auth.access.trim();
+  if (auth.type === "api" && auth.key?.trim()) return auth.key.trim();
+  if (auth.type === "wellknown" && auth.token?.trim()) return auth.token.trim();
+  return undefined;
+}
+
+function registerCommand(
+  cfg: { command?: Record<string, { template: string; description?: string }> },
+  name: string,
+  description: string,
+  template: string,
+): void {
+  cfg.command ??= {};
+  if (cfg.command[name]) return;
+  cfg.command[name] = { description, template };
 }
 
 export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
@@ -30,14 +57,49 @@ export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
         existing.models = models as never;
         existing.npm ??= sdkModuleUrl;
         existing.name ??= "Antigravity";
-        return;
+      } else {
+        cfg.provider[ANTIGRAVITY_PROVIDER_ID] = {
+          name: "Antigravity",
+          npm: sdkModuleUrl,
+          models: models as never,
+        };
       }
 
-      cfg.provider[ANTIGRAVITY_PROVIDER_ID] = {
-        name: "Antigravity",
-        npm: sdkModuleUrl,
-        models: models as never,
-      };
+      registerCommand(
+        cfg,
+        "antigravity-usage",
+        "Show Antigravity shared quota pools",
+        "Call the antigravity_usage tool and show the result to the user. Do not add extra commentary.",
+      );
+      registerCommand(
+        cfg,
+        "antigravity-models",
+        "List Antigravity runtime models and remaining quota",
+        "Call the antigravity_models tool and show the result to the user. Do not add extra commentary.",
+      );
+      registerCommand(
+        cfg,
+        "antigravity-image",
+        "Generate an image via Antigravity",
+        "Call the generate_image tool with the user's remaining prompt as the image description. If they specified a ratio or path, pass those through.",
+      );
+    },
+
+    tool: createAntigravityTools(),
+
+    provider: {
+      id: ANTIGRAVITY_PROVIDER_ID,
+      async models(_provider, ctx) {
+        const token =
+          accessTokenFromAuth(ctx.auth as { type?: string; access?: string; key?: string; token?: string } | undefined) ??
+          (await resolveCatalogAccessToken());
+        if (!token) return loadModels() as never;
+        try {
+          return (await loadLiveOpenCodeModels(token)) as never;
+        } catch {
+          return loadModels() as never;
+        }
+      },
     },
 
     auth: {

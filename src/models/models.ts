@@ -1,13 +1,10 @@
 import { ThinkingEffort } from "../types/enums.js";
+import type { AntigravityRouting } from "./types.js";
+
+export type { AntigravityRouting };
 
 export const PROVIDER_ID = "antigravity";
 export const PROVIDER_NAME = "Antigravity (Google Cloud Code Assist)";
-
-export interface AntigravityRouting {
-  off?: string;
-  routing?: Partial<Record<ThinkingEffort, string>>;
-  defaultRequestId?: string;
-}
 
 export const ANTIGRAVITY_ROUTING: Record<string, AntigravityRouting> = {
   "claude-opus-4-6": {
@@ -130,8 +127,18 @@ export function getMaxOutputTokens(runtimeModel: string, requestedMaxTokens?: nu
   return Math.min(requestedMaxTokens, modelLimit);
 }
 
+let discoveredRouting: Record<string, AntigravityRouting> = {};
+
+export function applyDiscoveredRouting(routing: Record<string, AntigravityRouting>): void {
+  discoveredRouting = routing;
+}
+
+export function resetDiscoveredRouting(): void {
+  discoveredRouting = {};
+}
+
 export function getAntigravityRequestModelId(modelId: string, effort: string | undefined): string {
-  const r = ANTIGRAVITY_ROUTING[modelId];
+  const r = ANTIGRAVITY_ROUTING[modelId] ?? discoveredRouting[modelId];
   if (!r) return modelId;
 
   // Unspecified effort matches Antigravity CLI / OpenCode's Gemini default: high.
