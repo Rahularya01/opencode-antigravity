@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -84,6 +84,38 @@ describe("OpenCode auth store", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     // The cheap refresh only: project discovery is a separate round trip.
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(TOKEN_URL);
+
+    const persisted = JSON.parse(readFileSync(join(dataHome, "opencode", "auth.json"), "utf8"));
+    expect(persisted.antigravity.access).toBe("fresh-access");
+    expect(persisted.antigravity.refresh).toBe("refresh-token");
+    expect(persisted.antigravity.expires).toBeGreaterThan(Date.now());
+  });
+
+  it("writes a rotated refresh token back to auth.json", async () => {
+    writeAuth({
+      type: "oauth",
+      access: "stale-access",
+      refresh: "old-refresh",
+      expires: Date.now() - 1000,
+      email: "user@example.com",
+    });
+
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "fresh-access",
+            refresh_token: "new-refresh",
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+
+    expect(await resolveCatalogAccessToken()).toBe("fresh-access");
+    const persisted = JSON.parse(readFileSync(join(dataHome, "opencode", "auth.json"), "utf8"));
+    expect(persisted.antigravity.refresh).toBe("new-refresh");
+    expect(persisted.antigravity.email).toBe("user@example.com");
   });
 
   it("shares a single refresh between concurrent callers", async () => {

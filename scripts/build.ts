@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { copyFile, rm } from "node:fs/promises";
 
 const OUT_DIR = "dist";
 const EXTERNAL = ["@ai-sdk/provider", "@opencode-ai/plugin"];
@@ -22,6 +22,9 @@ if (!result.success) {
   console.error("\nBuild failed.");
   process.exit(1);
 }
+
+await copyFile("src/entries/plugin.d.ts", `${OUT_DIR}/plugin.d.ts`);
+await copyFile("src/entries/sdk.d.ts", `${OUT_DIR}/sdk.d.ts`);
 
 for (const output of result.outputs) {
   const kb = (output.size / 1024).toFixed(1);

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -52,7 +52,35 @@ export function parseAuthFile(raw: string): StoredAuth | undefined {
   return undefined;
 }
 
-export type ResolvedToken = { token: string; expires?: number };
+export type ResolvedToken = { token: string; expires?: number; refresh?: string };
+
+function persistOAuthCredentials(update: {
+  access: string;
+  refresh?: string;
+  expires?: number;
+}): void {
+  try {
+    const path = opencodeAuthPath();
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    const file = parsed as Record<string, unknown>;
+    const entry = file[ANTIGRAVITY_PROVIDER_ID];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+    const record = entry as Record<string, unknown>;
+    if (record.type !== "oauth") return;
+    file[ANTIGRAVITY_PROVIDER_ID] = {
+      ...record,
+      access: update.access,
+      ...(update.refresh ? { refresh: update.refresh } : {}),
+      ...(update.expires !== undefined ? { expires: update.expires } : {}),
+    };
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(file, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(tmp, path);
+  } catch {
+    // Best-effort: a failed write still leaves the in-memory token usable.
+  }
+}
 
 export async function tokenFromStoredAuth(
   auth: StoredAuth,
@@ -68,7 +96,11 @@ export async function tokenFromStoredAuth(
       // Deliberately the discovery-free refresh: this path only needs a usable
       // access token, and project lookup costs an extra round trip per call.
       const refreshed = await refreshAntigravityAccessToken(auth.refresh);
-      return { token: refreshed.access, expires: refreshed.expires };
+      return {
+        token: refreshed.access,
+        expires: refreshed.expires,
+        refresh: refreshed.refresh,
+      };
     } catch {
       return auth.access ? { token: auth.access, expires: auth.expires } : undefined;
     }
@@ -106,6 +138,13 @@ export async function resolveCatalogAccessToken(): Promise<string | undefined> {
       if (!stored) return undefined;
       const resolved = await tokenFromStoredAuth(stored);
       if (!resolved) return undefined;
+      if (resolved.refresh) {
+        persistOAuthCredentials({
+          access: resolved.token,
+          refresh: resolved.refresh,
+          expires: resolved.expires,
+        });
+      }
       cachedToken = {
         token: resolved.token,
         // Re-check shortly before expiry; cap the window for tokens that

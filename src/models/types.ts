@@ -3,5 +3,5 @@ export type OpenCodeModelConfig = {
   reasoning?: boolean;
   limit?: { context: number; output: number };
   modalities?: { input: Array<"text" | "image" | "audio">; output: Array<"text" | "image"> };
-  variants?: Record<string, { effort?: string }>;
+  variants?: Record<string, { effort?: string; reasoningEffort?: string }>;
 };

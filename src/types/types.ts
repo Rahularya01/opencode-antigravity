@@ -15,14 +15,6 @@ export interface CallbackServer {
   cleanup: () => void;
 }
 
-export interface DynamicModelInfo {
-  available: boolean;
-  runtimeModel?: string;
-  quotaGroup?: string;
-  resetTime?: string;
-  raw?: Record<string, unknown>;
-}
-
 export interface GeminiTextPart {
   text: string;
   thought?: boolean;

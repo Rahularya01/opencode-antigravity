@@ -2,7 +2,7 @@
 
 Use **Google Antigravity / Cloud Code Assist** models inside **[OpenCode](https://opencode.ai)**. This package is an OpenCode plugin plus a Vercel AI SDK `LanguageModelV3` provider. Antigravity is the model backend; OpenCode keeps the agent loop — tools, permissions, sessions, and compaction.
 
-It communicates directly with Google's Cloud Code Assist endpoints (`streamGenerateCode` / `v1internal:streamGenerateCode`) using HTTPS and server-sent events (SSE).
+It communicates directly with Google's Cloud Code Assist endpoints (`streamGenerateContent` / `v1internal:streamGenerateContent`) using HTTPS and server-sent events (SSE).
 
 > **Unofficial integration.** This project is not affiliated with or endorsed by Google. Use it only with an account and services you are authorized to access.
 

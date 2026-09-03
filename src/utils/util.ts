@@ -11,7 +11,10 @@ export function asString(value: unknown): string | undefined {
 }
 
 export function sanitizeText(text: unknown): string {
-  return String(text ?? "").replace(/[\uD800-\uDFFF]/g, "\uFFFD");
+  return String(text ?? "").replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "\uFFFD",
+  );
 }
 
 export function escapeHtml(text: string): string {
@@ -38,24 +41,9 @@ export const ANTIGRAVITY_MODEL_ENUM: Record<string, string> = {
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
 import crypto from "node:crypto";
 
-function getConversationSeed(prompt?: LanguageModelV3Prompt): string {
-  if (!prompt || prompt.length === 0) return crypto.randomUUID();
-  for (const msg of prompt) {
-    if (msg.role === "user") {
-      const content = msg.content as unknown;
-      if (typeof content === "string" && content.trim()) {
-        return content.trim();
-      }
-      if (Array.isArray(content)) {
-        for (const part of content) {
-          if (isRecord(part) && part.type === "text" && typeof part.text === "string" && part.text.trim()) {
-            return part.text.trim();
-          }
-        }
-      }
-    }
-  }
-  return crypto.randomUUID();
+function conversationSeed(sessionId?: string): string {
+  const trimmed = sessionId?.trim();
+  return trimmed || crypto.randomUUID();
 }
 
 function deterministicHash(seed: string): Buffer {
@@ -98,7 +86,8 @@ export function antigravityRequestEnvelope(
     step?: number;
   },
 ): { requestId: string; sessionId: string; labels: Record<string, string> } {
-  const seed = getConversationSeed(options?.prompt);
+  const providedSession = options?.sessionId?.trim();
+  const seed = conversationSeed(providedSession);
   const agentId = deterministicUuid(`agent:${seed}`);
   const trajectoryId = deterministicUuid(`trajectory:${seed}`);
   const { step, lastStepIndex } =
@@ -106,10 +95,7 @@ export function antigravityRequestEnvelope(
       ? { step: options.step, lastStepIndex: Math.max(0, options.step - 1) }
       : calculateStep(options?.prompt);
 
-  const sessionId =
-    options?.sessionId && options.sessionId.trim()
-      ? options.sessionId.trim()
-      : deterministicBigInt(`session:${seed}`);
+  const sessionId = providedSession || deterministicBigInt(`session:${seed}`);
 
   const usageLabel = isClaude ? "true" : "false";
   const labels: Record<string, string> = {

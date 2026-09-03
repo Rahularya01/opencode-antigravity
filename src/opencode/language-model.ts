@@ -118,13 +118,23 @@ export function createAntigravityLanguageModel(
       const sessionId = sessionIdFromHeaders(callOptions.headers);
       const reasoningEffort = reasoningFromCall(callOptions);
       const warnings = unsupportedSettingWarnings(callOptions);
+      const streamAbort = new AbortController();
+      const abortSignal = callOptions.abortSignal
+        ? AbortSignal.any([callOptions.abortSignal, streamAbort.signal])
+        : streamAbort.signal;
 
-      const inner = streamAntigravity(modelId, callOptions, {
-        accessToken,
-        projectId: options.projectId,
-        reasoningEffort,
-        sessionId,
-      });
+      const inner = streamAntigravity(
+        modelId,
+        { ...callOptions, abortSignal },
+        {
+          accessToken,
+          projectId: options.projectId,
+          reasoningEffort,
+          sessionId,
+          baseURL: options.baseURL,
+          headers: options.headers,
+        },
+      );
 
       const stream = new ReadableStream<LanguageModelV3StreamPart>({
         async start(controller) {
@@ -134,6 +144,7 @@ export function createAntigravityLanguageModel(
 
           try {
             for await (const event of inner) {
+              if (streamAbort.signal.aborted) return;
               switch (event.type) {
                 case "text_start": {
                   const id = `text-${event.contentIndex}`;
@@ -243,9 +254,17 @@ export function createAntigravityLanguageModel(
             }
             controller.close();
           } catch (error) {
-            controller.enqueue({ type: "error", error });
-            controller.close();
+            if (streamAbort.signal.aborted) return;
+            try {
+              controller.enqueue({ type: "error", error });
+              controller.close();
+            } catch {
+              // Consumer already cancelled.
+            }
           }
+        },
+        cancel() {
+          streamAbort.abort();
         },
       });
 

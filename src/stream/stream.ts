@@ -177,6 +177,8 @@ export interface StreamAntigravityOptions {
   projectId?: string;
   reasoningEffort?: string;
   sessionId?: string;
+  baseURL?: string;
+  headers?: Record<string, string>;
 }
 
 // Bounds how long a single endpoint/model candidate is given to respond with
@@ -190,7 +192,11 @@ export async function* streamAntigravity(
   callOptions: LanguageModelV3CallOptions,
   options: StreamAntigravityOptions,
 ): AsyncIterable<AntigravityStreamEvent> {
-  const projectId = await resolveProjectId(options.accessToken, options.projectId);
+  const projectId = await resolveProjectId(
+    options.accessToken,
+    options.projectId,
+    options.baseURL,
+  );
   const baseRuntimeModel = getAntigravityRequestModelId(modelId, options.reasoningEffort);
 
   let initialRuntimeModel = baseRuntimeModel;
@@ -200,7 +206,7 @@ export async function* streamAntigravity(
     runtimeCandidates.push(fallback);
   }
 
-  const bases = endpointCandidates();
+  const bases = endpointCandidates(options.baseURL);
   let lastError: Error | undefined;
 
   for (let candIdx = 0; candIdx < runtimeCandidates.length; candIdx++) {
@@ -209,6 +215,7 @@ export async function* streamAntigravity(
       (modelId.startsWith("claude-") || runtimeModel.startsWith("claude-"));
 
     const requestHeaders: Record<string, string> = {
+      ...(options.headers ?? {}),
       ...antigravityHeaders(options.accessToken),
       ...(isClaudeReasoning ? { "anthropic-beta": "interleaved-thinking-2025-05-14" } : {}),
     };
@@ -259,12 +266,15 @@ export async function* streamAntigravity(
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         lastError = new Error(friendlyAntigravityError(response.status, errorText));
+        if (response.status === 401) {
+          yield {
+            type: "error",
+            error: { errorMessage: lastError.message, status: 401 },
+          };
+          return;
+        }
         if (response.status === 404) {
           // Model missing on this family of endpoints — try the next runtime candidate
-          break;
-        }
-        if (response.status === 401) {
-          // Token is invalid on every host
           break;
         }
         // 429/403 are often host-specific (daily vs prod quota pools). Try the next base URL.

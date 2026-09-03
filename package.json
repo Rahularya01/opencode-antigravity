@@ -1,15 +1,28 @@
 {
   "name": "@rahularya01/opencode-antigravity",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "OpenCode plugin that provides Google Antigravity / Cloud Code Assist models (Gemini, Claude, GPT-OSS) to OpenCode via an AI SDK LanguageModelV3 provider.",
   "author": "Rahul Arya",
   "license": "MIT",
   "type": "module",
   "main": "./dist/plugin.js",
+  "types": "./dist/plugin.d.ts",
   "exports": {
-    ".": "./dist/plugin.js",
-    "./plugin": "./dist/plugin.js",
-    "./sdk": "./dist/sdk.js"
+    ".": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js",
+      "default": "./dist/plugin.js"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js",
+      "default": "./dist/plugin.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk.d.ts",
+      "import": "./dist/sdk.js",
+      "default": "./dist/sdk.js"
+    }
   },
   "publishConfig": {
     "access": "public",

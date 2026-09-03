@@ -161,6 +161,26 @@ describe("Antigravity Stream & Transform", () => {
     expect(body.project).toBe("real-cloud-project");
   });
 
+  it("sends HIGH thinking by default and honors explicit effort", () => {
+    const prompt = [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }];
+    const high = buildAntigravityRequestBody({
+      modelId: "gemini-3.8-flash",
+      runtimeModel: "gemini-3.8-flash-tiered",
+      projectId: "p",
+      callOptions: { prompt } as never,
+    });
+    expect(high.request.generationConfig?.thinkingConfig?.thinkingLevel).toBe("HIGH");
+
+    const low = buildAntigravityRequestBody({
+      modelId: "gemini-3.8-flash",
+      runtimeModel: "gemini-3.8-flash-tiered",
+      projectId: "p",
+      callOptions: { prompt } as never,
+      reasoningEffort: "low",
+    });
+    expect(low.request.generationConfig?.thinkingConfig?.thinkingLevel).toBe("LOW");
+  });
+
   it("inlines $ref chains so no pointer reaches the backend", () => {
     // A definition that references another definition. Walking $defs before
     // properties used to mark every definition as visited, leaving the nested
@@ -294,6 +314,69 @@ describe("Antigravity Stream & Transform", () => {
     );
     expect(features).toContain("seed");
     expect(features).toContain("frequencyPenalty");
+  });
+
+  it("fails fast on 401 instead of retrying other models", async () => {
+    let generateCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (String(input).includes("streamGenerateContent")) generateCalls++;
+      return new Response("unauthorized", { status: 401 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const events: Array<{ type: string }> = [];
+      for await (const event of streamAntigravity(
+        "gemini-3.8-flash",
+        { prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] } as never,
+        { accessToken: "token", projectId: "p" },
+      )) {
+        events.push(event);
+      }
+      expect(generateCalls).toBe(1);
+      expect(events.some((e) => e.type === "error")).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("uses the SDK baseURL and extra headers on generate requests", async () => {
+    const originalFetch = globalThis.fetch;
+    const seen: Array<{ url: string; headers: Headers }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      seen.push({ url, headers: new Headers(init?.headers) });
+      if (url.includes("streamGenerateContent")) {
+        return new Response("data: [DONE]\n\n", {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const events = [];
+      for await (const event of streamAntigravity(
+        "gemini-3.7-flash",
+        { prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } as never,
+        {
+          accessToken: "token",
+          projectId: "p",
+          baseURL: "https://cloudcode-pa.googleapis.com",
+          headers: { "X-Test-Header": "1" },
+        },
+      )) {
+        events.push(event);
+      }
+      const generate = seen.find((s) => s.url.includes("streamGenerateContent"));
+      expect(generate?.url.startsWith("https://cloudcode-pa.googleapis.com/")).toBe(true);
+      expect(generate?.headers.get("X-Test-Header")).toBe("1");
+      expect(generate?.headers.get("Authorization")).toBe("Bearer token");
+      expect(events.length).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("synthesizes a fallback response when the model emits only thinking and zero text without tool calls", async () => {

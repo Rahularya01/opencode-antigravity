@@ -134,7 +134,18 @@ export function getAntigravityRequestModelId(modelId: string, effort: string | u
   const r = ANTIGRAVITY_ROUTING[modelId];
   if (!r) return modelId;
 
-  if (effort === undefined || effort === "off") {
+  // Unspecified effort matches Antigravity CLI / OpenCode's Gemini default: high.
+  if (effort === undefined) {
+    return (
+      r.routing?.high ??
+      r.routing?.xhigh ??
+      r.defaultRequestId ??
+      r.off ??
+      modelId
+    );
+  }
+
+  if (effort === "off" || effort === "none") {
     return r.off ?? r.routing?.minimal ?? r.routing?.low ?? r.defaultRequestId ?? modelId;
   }
 
@@ -162,14 +173,8 @@ export function getAntigravityRequestModelId(modelId: string, effort: string | u
 }
 
 export function getFallbackRuntimeModel(runtimeModel: string, effort?: string): string | undefined {
-  if (runtimeModel === "gemini-3.8-flash-tiered") {
+  if (runtimeModel === "gemini-3.8-flash" || runtimeModel.startsWith("gemini-3.8-flash-")) {
     return getAntigravityRequestModelId("gemini-3.7-flash", effort);
-  }
-  if (runtimeModel.startsWith("gemini-3.8-flash-")) {
-    return runtimeModel.replace("gemini-3.8-flash-", "gemini-3.7-flash-tiered");
-  }
-  if (runtimeModel === "gemini-3.8-flash") {
-    return "gemini-3.7-flash-tiered";
   }
   if (runtimeModel === "gemini-3.7-flash-tiered") {
     return getAntigravityRequestModelId("gemini-3.6-flash", effort);
@@ -193,8 +198,9 @@ export type ThinkingWire = {
 
 function googleLevel(effort: string | undefined): GeminiThinkingLevel {
   const eff = effort?.toLowerCase();
-  if (eff === "high" || eff === "xhigh" || eff === "max") return "HIGH";
+  if (!eff || eff === "high" || eff === "xhigh" || eff === "max") return "HIGH";
   if (eff === "medium") return "MEDIUM";
+  if (eff === "minimal" || eff === "min" || eff === "off" || eff === "none") return "MINIMAL";
   return "LOW";
 }
 
@@ -210,9 +216,9 @@ export function getThinkingConfig(
     return { includeThoughts: true, thinkingLevel: googleLevel(effort) };
   }
   if (modelId === "gemini-3.5-flash") {
-    if (!effort || effort === "off") return { includeThoughts: false, thinkingBudget: 0 };
+    if (effort === "off" || effort === "none") return { includeThoughts: false, thinkingBudget: 0 };
     const thinkingBudget =
-      effort === "high" || effort === "xhigh" || effort === "max"
+      !effort || effort === "high" || effort === "xhigh" || effort === "max"
         ? 10_000
         : effort === "medium"
           ? 4_000
@@ -220,11 +226,11 @@ export function getThinkingConfig(
     return { includeThoughts: true, thinkingBudget };
   }
   if (modelId === "gemini-3.1-pro") {
-    if (!effort || effort === "off") return { includeThoughts: false, thinkingBudget: 0 };
+    if (effort === "off" || effort === "none") return { includeThoughts: false, thinkingBudget: 0 };
     return {
       includeThoughts: true,
       thinkingBudget:
-        effort === "high" || effort === "xhigh" || effort === "max" ? 10_001 : 1_001,
+        !effort || effort === "high" || effort === "xhigh" || effort === "max" ? 10_001 : 1_001,
     };
   }
   return undefined;

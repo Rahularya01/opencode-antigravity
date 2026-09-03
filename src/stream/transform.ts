@@ -344,7 +344,6 @@ export function convertPromptToContents(
 
     if (message.role === "assistant") {
       const parts: GeminiPart[] = [];
-      let firstFunctionCall = true;
       for (const part of message.content) {
         if (part.type === "text") {
           if (part.text && part.text.trim()) {

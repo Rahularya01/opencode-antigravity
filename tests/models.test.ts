@@ -19,6 +19,15 @@ describe("Models & Catalog", () => {
     expect(getAntigravityRequestModelId("claude-sonnet-4-6", "high")).toBe("claude-sonnet-4-6");
   });
 
+  it("defaults unspecified effort to high, matching Antigravity CLI", () => {
+    expect(getAntigravityRequestModelId("gemini-3.6-flash", undefined)).toBe("gemini-3.6-flash-high");
+    expect(getAntigravityRequestModelId("gemini-3.1-pro", undefined)).toBe("gemini-pro-agent");
+    expect(getAntigravityRequestModelId("gemini-3.6-flash", "off")).toBe("gemini-3.6-flash-low");
+    expect(getThinkingConfig("gemini-3.8-flash", undefined)?.thinkingLevel).toBe("HIGH");
+    expect(getThinkingConfig("gemini-3.8-flash", "minimal")?.thinkingLevel).toBe("MINIMAL");
+    expect(getThinkingConfig("gemini-3.5-flash", undefined)?.thinkingBudget).toBe(10_000);
+  });
+
   it("provides thinking configuration for supported models", () => {
     const flash38Thinking = getThinkingConfig("gemini-3.8-flash", "high");
     expect(flash38Thinking?.includeThoughts).toBe(true);
@@ -35,7 +44,8 @@ describe("Models & Catalog", () => {
 
   it("handles fallback runtime models on missing entities", () => {
     expect(getFallbackRuntimeModel("gemini-3.8-flash-tiered")).toBe("gemini-3.7-flash-tiered");
-    expect(getFallbackRuntimeModel("gemini-3.7-flash-tiered")).toBe("gemini-3.6-flash-low");
+    expect(getFallbackRuntimeModel("gemini-3.8-flash-low")).toBe("gemini-3.7-flash-tiered");
+    expect(getFallbackRuntimeModel("gemini-3.7-flash-tiered")).toBe("gemini-3.6-flash-high");
     expect(getFallbackRuntimeModel("gemini-3.7-flash-low")).toBe("gemini-3.6-flash-low");
   });
 

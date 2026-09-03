@@ -1,5 +1,9 @@
 import type { OpenCodeModelConfig } from "./types.js";
-import { ANTIGRAVITY_ROUTING, RUNTIME_MAX_OUTPUT_TOKENS } from "./models.js";
+import { RUNTIME_MAX_OUTPUT_TOKENS } from "./models.js";
+
+function effortVariant(effort: string): { effort: string; reasoningEffort: string } {
+  return { effort, reasoningEffort: effort };
+}
 
 export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
   "gemini-3.8-flash": {
@@ -14,9 +18,9 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      low: { effort: "low" },
-      medium: { effort: "medium" },
-      high: { effort: "high" },
+      low: effortVariant("low"),
+      medium: effortVariant("medium"),
+      high: effortVariant("high"),
     },
   },
   "gemini-3.7-flash": {
@@ -31,9 +35,9 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      low: { effort: "low" },
-      medium: { effort: "medium" },
-      high: { effort: "high" },
+      low: effortVariant("low"),
+      medium: effortVariant("medium"),
+      high: effortVariant("high"),
     },
   },
   "gemini-3.6-flash": {
@@ -48,9 +52,9 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      low: { effort: "low" },
-      medium: { effort: "medium" },
-      high: { effort: "high" },
+      low: effortVariant("low"),
+      medium: effortVariant("medium"),
+      high: effortVariant("high"),
     },
   },
   "gemini-3.5-flash": {
@@ -65,9 +69,9 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      low: { effort: "low" },
-      medium: { effort: "medium" },
-      high: { effort: "high" },
+      low: effortVariant("low"),
+      medium: effortVariant("medium"),
+      high: effortVariant("high"),
     },
   },
   "gemini-3.1-pro": {
@@ -82,8 +86,8 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      low: { effort: "low" },
-      high: { effort: "high" },
+      low: effortVariant("low"),
+      high: effortVariant("high"),
     },
   },
   "claude-sonnet-4-6": {
@@ -98,7 +102,7 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      thinking: { effort: "high" },
+      thinking: effortVariant("high"),
     },
   },
   "claude-opus-4-6": {
@@ -113,7 +117,7 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      thinking: { effort: "high" },
+      thinking: effortVariant("high"),
     },
   },
   "gpt-oss-120b": {
@@ -128,7 +132,7 @@ export const BUILTIN_ANTIGRAVITY_MODELS: Record<string, OpenCodeModelConfig> = {
       output: ["text"],
     },
     variants: {
-      medium: { effort: "medium" },
+      medium: effortVariant("medium"),
     },
   },
 };

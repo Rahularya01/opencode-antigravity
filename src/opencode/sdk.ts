@@ -36,11 +36,11 @@ let prewarmed = false;
  * Pay the TLS handshake once at provider construction rather than on the first
  * message of the session. Best-effort and fire-and-forget.
  */
-function prewarmOnce(): void {
+function prewarmOnce(baseURL?: string): void {
   if (prewarmed) return;
   prewarmed = true;
   try {
-    const base = endpointCandidates()[0];
+    const base = endpointCandidates(baseURL)[0];
     if (base) prewarmConnection(base);
   } catch {
     // A misconfigured base URL is reported when a request is actually made.
@@ -49,7 +49,7 @@ function prewarmOnce(): void {
 
 export function createAntigravity(options: CreateAntigravityOptions = {}): AntigravityProvider {
   const providerId = options.name || "antigravity";
-  prewarmOnce();
+  prewarmOnce(options.baseURL);
 
   const createModel = (modelId: string): LanguageModelV3 =>
     createAntigravityLanguageModel(modelId, providerId, options, () => resolveAccessToken(options));

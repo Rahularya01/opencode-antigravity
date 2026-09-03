@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { Platform } from "../types/enums.js";
-import { assertSafeApiBaseUrl, safeError } from "../utils/security.js";
-import type { DynamicModelInfo } from "../types/types.js";
-import { antigravityEnv, asString, escapeRegExp, isRecord } from "../utils/util.js";
+import { assertSafeApiBaseUrl } from "../utils/security.js";
+import { antigravityEnv, isRecord } from "../utils/util.js";
 import { antigravityFetch } from "../utils/http.js";
 
 export const ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com";
@@ -13,23 +12,21 @@ export const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
 /** Managed Cloud Code Assist project used by Antigravity when discovery returns nothing. */
 export const ANTIGRAVITY_MANAGED_PROJECT_ID = "rising-fact-p41fc";
 
-export const DEFAULT_ENDPOINT = ANTIGRAVITY_ENDPOINT_DAILY;
+export const DEFAULT_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
 export const ENDPOINT_FALLBACKS = [
-  ANTIGRAVITY_ENDPOINT_DAILY,
   ANTIGRAVITY_ENDPOINT_PROD,
+  ANTIGRAVITY_ENDPOINT_DAILY,
   ANTIGRAVITY_ENDPOINT_DAILY_SANDBOX,
 ];
 export const LOAD_ENDPOINT_FALLBACKS = [
-  ANTIGRAVITY_ENDPOINT_DAILY,
   ANTIGRAVITY_ENDPOINT_PROD,
+  ANTIGRAVITY_ENDPOINT_DAILY,
   ANTIGRAVITY_ENDPOINT_DAILY_SANDBOX,
 ];
 
 const PROJECT_CACHE_TTL_MS = 30 * 60 * 1000;
+const PROJECT_NEGATIVE_CACHE_TTL_MS = 15_000;
 const projectCache = new Map<string, { projectId: string | undefined; expiresAt: number }>();
-
-const MODEL_CACHE_TTL_MS = 30 * 60 * 1000;
-const modelCache = new Map<string, { result: DynamicModelInfo | undefined; expiresAt: number }>();
 
 /**
  * Cache keys embed the access token, which rotates roughly hourly. Without
@@ -97,13 +94,13 @@ function loadCodeAssistBody(projectId?: string): string {
   });
 }
 
-export function endpointCandidates(): string[] {
-  const explicit = antigravityEnv("BASE_URL")?.trim();
+export function endpointCandidates(explicitBaseUrl?: string): string[] {
+  const explicit = explicitBaseUrl?.trim() || antigravityEnv("BASE_URL")?.trim();
   return explicit ? [assertSafeApiBaseUrl(explicit)] : ENDPOINT_FALLBACKS;
 }
 
-export function loadEndpointCandidates(): string[] {
-  const explicit = antigravityEnv("BASE_URL")?.trim();
+export function loadEndpointCandidates(explicitBaseUrl?: string): string[] {
+  const explicit = explicitBaseUrl?.trim() || antigravityEnv("BASE_URL")?.trim();
   return explicit ? [assertSafeApiBaseUrl(explicit)] : LOAD_ENDPOINT_FALLBACKS;
 }
 
@@ -152,6 +149,7 @@ export function jsonOrTextError(text: string): string {
 export async function loadCodeAssist(
   token: string,
   hintProjectId?: string,
+  baseURL?: string,
 ): Promise<string | undefined> {
   const cached = projectCache.get(token);
   if (cached && Date.now() < cached.expiresAt) return cached.projectId;
@@ -160,7 +158,7 @@ export async function loadCodeAssist(
     ? hintProjectId.trim()
     : undefined;
 
-  for (const base of loadEndpointCandidates()) {
+  for (const base of loadEndpointCandidates(baseURL)) {
     try {
       const url = `${base}/v1internal:loadCodeAssist`;
       const headers = loadCodeAssistHeaders(token);
@@ -209,7 +207,7 @@ export async function loadCodeAssist(
 
   setWithExpiry(projectCache, token, {
     projectId: undefined,
-    expiresAt: Date.now() + PROJECT_CACHE_TTL_MS,
+    expiresAt: Date.now() + PROJECT_NEGATIVE_CACHE_TTL_MS,
   });
   return undefined;
 }
@@ -217,6 +215,7 @@ export async function loadCodeAssist(
 export async function resolveProjectId(
   token: string,
   explicitProjectId?: string,
+  baseURL?: string,
 ): Promise<string> {
   const envProject = antigravityEnv("PROJECT_ID")?.trim();
   if (envProject && envProject !== "default-cli-project" && !isGeneratedProjectId(envProject)) {
@@ -239,7 +238,7 @@ export async function resolveProjectId(
   }
 
   try {
-    const discovered = await loadCodeAssist(token, usableExplicit);
+    const discovered = await loadCodeAssist(token, usableExplicit, baseURL);
     if (discovered) {
       setWithExpiry(projectCache, token, {
         projectId: discovered,
@@ -251,81 +250,5 @@ export async function resolveProjectId(
     // fall through
   }
 
-  const finalProject = usableExplicit ?? ANTIGRAVITY_MANAGED_PROJECT_ID;
-  setWithExpiry(projectCache, token, {
-    projectId: finalProject,
-    expiresAt: Date.now() + PROJECT_CACHE_TTL_MS,
-  });
-  return finalProject;
-}
-
-function findModelEntry(
-  models: Record<string, unknown>,
-  targetModel: string,
-): { key: string; val: Record<string, unknown> } | undefined {
-  const targetLower = targetModel.toLowerCase();
-  const targetRe = new RegExp(`^${escapeRegExp(targetLower)}(?:[-_]|$)`, "i");
-
-  for (const [key, val] of Object.entries(models)) {
-    if (!isRecord(val)) continue;
-    const name = asString(val.name)?.toLowerCase() || "";
-    const keyLower = key.toLowerCase();
-    if (
-      keyLower === targetLower ||
-      name === targetLower ||
-      targetRe.test(keyLower) ||
-      targetRe.test(name)
-    ) {
-      return { key, val };
-    }
-  }
-  return undefined;
-}
-
-export async function fetchAvailableRuntimeModel(
-  token: string,
-  projectId: string,
-  modelId: string,
-): Promise<DynamicModelInfo | undefined> {
-  const cacheKey = `${token}:${projectId}:${modelId}`;
-  const cached = modelCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) return cached.result;
-
-  for (const base of endpointCandidates()) {
-    try {
-      const response = await antigravityFetch(`${base}/v1internal:fetchAvailableModels`, {
-        method: "POST",
-        headers: antigravityHeaders(token),
-        body: JSON.stringify({ project: projectId }),
-        signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
-      });
-
-      if (!response.ok) continue;
-
-      const data = (await response.json()) as {
-        models?: Record<string, unknown>;
-      };
-      if (!isRecord(data.models)) continue;
-
-      const matched = findModelEntry(data.models, modelId);
-      if (matched) {
-        const info: DynamicModelInfo = {
-          available: true,
-          runtimeModel: matched.key,
-          quotaGroup: asString(matched.val.quotaGroup),
-          resetTime: asString(matched.val.resetTime),
-          raw: matched.val,
-        };
-        setWithExpiry(modelCache, cacheKey, {
-          result: info,
-          expiresAt: Date.now() + MODEL_CACHE_TTL_MS,
-        });
-        return info;
-      }
-    } catch {
-      // try next endpoint candidate
-    }
-  }
-
-  return undefined;
+  return usableExplicit ?? ANTIGRAVITY_MANAGED_PROJECT_ID;
 }

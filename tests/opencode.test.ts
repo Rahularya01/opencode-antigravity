@@ -6,12 +6,36 @@ import {
   AntigravityPlugin,
 } from "../src/opencode/plugin.js";
 import { ANTIGRAVITY_PROVIDER_ID } from "../src/opencode/plugin-id.js";
+import { reasoningFromCall } from "../src/opencode/prompt.js";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   mock.restore();
+});
+
+describe("reasoningFromCall", () => {
+  it("reads OpenCode variant options from providerOptions", () => {
+    expect(
+      reasoningFromCall({
+        prompt: [],
+        providerOptions: { antigravity: { reasoningEffort: "high" } },
+      } as never),
+    ).toBe("high");
+    expect(
+      reasoningFromCall({
+        prompt: [],
+        providerOptions: { google: { thinkingConfig: { thinkingLevel: "high" } } },
+      } as never),
+    ).toBe("high");
+    expect(
+      reasoningFromCall({
+        prompt: [],
+        providerOptions: { antigravity: { effort: "medium" } },
+      } as never),
+    ).toBe("medium");
+  });
 });
 
 describe("OpenCode Plugin & SDK", () => {
