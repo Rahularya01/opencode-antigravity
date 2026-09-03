@@ -54,10 +54,20 @@ describe("OpenCode Plugin & SDK", () => {
     expect(typeof model.doGenerate).toBe("function");
   });
 
-  it("plugin entry only default-exports a factory", async () => {
+  it("plugin entry default-exports a v1 server plugin", async () => {
     const mod = await import("../src/entries/plugin.js");
     expect(Object.keys(mod)).toEqual(["default"]);
-    expect(typeof mod.default).toBe("function");
+    expect(mod.default).toEqual(
+      expect.objectContaining({
+        id: "@rahularya01/opencode-antigravity",
+      }),
+    );
+    expect(typeof (mod.default as { server?: unknown }).server).toBe("function");
+  });
+
+  it("tui entry default-exports a no-op tui plugin", async () => {
+    const mod = await import("../src/entries/tui.js");
+    expect(typeof (mod.default as { tui?: unknown }).tui).toBe("function");
   });
 
   it("is a function OpenCode can load as plugin", () => {

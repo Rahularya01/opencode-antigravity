@@ -1,3 +1,8 @@
 import { createAntigravityPlugin } from "../opencode/plugin.js";
 
-export default createAntigravityPlugin(new URL("./sdk.js", import.meta.url).href);
+const server = createAntigravityPlugin(new URL("./sdk.js", import.meta.url).href);
+
+export default {
+  id: "@rahularya01/opencode-antigravity",
+  server,
+};

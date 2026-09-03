@@ -6,7 +6,7 @@ const EXTERNAL = ["@ai-sdk/provider", "@opencode-ai/plugin"];
 await rm(OUT_DIR, { recursive: true, force: true });
 
 const result = await Bun.build({
-  entrypoints: ["src/entries/plugin.ts", "src/entries/sdk.ts"],
+  entrypoints: ["src/entries/plugin.ts", "src/entries/sdk.ts", "src/entries/tui.ts"],
   outdir: OUT_DIR,
   target: "node",
   format: "esm",
@@ -25,6 +25,7 @@ if (!result.success) {
 
 await copyFile("src/entries/plugin.d.ts", `${OUT_DIR}/plugin.d.ts`);
 await copyFile("src/entries/sdk.d.ts", `${OUT_DIR}/sdk.d.ts`);
+await copyFile("src/entries/tui.d.ts", `${OUT_DIR}/tui.d.ts`);
 
 for (const output of result.outputs) {
   const kb = (output.size / 1024).toFixed(1);
