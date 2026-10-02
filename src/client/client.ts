@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { assertSafeApiBaseUrl } from "../utils/security.js";
 import { antigravityEnv, isRecord } from "../utils/util.js";
 import { antigravityFetch } from "../utils/http.js";
+import {
+  setLastEndpoint,
+  setLastError,
+  setLastStatus,
+} from "../diagnostics/diagnostics.js";
 
 export const ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com";
 export const ANTIGRAVITY_ENDPOINT_DAILY_SANDBOX = "https://daily-cloudcode-pa.sandbox.googleapis.com";
@@ -11,16 +16,16 @@ export const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
 /** Managed Cloud Code Assist project used by Antigravity when discovery returns nothing. */
 export const ANTIGRAVITY_MANAGED_PROJECT_ID = "rising-fact-p41fc";
 
-export const DEFAULT_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
+export const DEFAULT_ENDPOINT = ANTIGRAVITY_ENDPOINT_DAILY;
 export const ENDPOINT_FALLBACKS = [
-  ANTIGRAVITY_ENDPOINT_PROD,
   ANTIGRAVITY_ENDPOINT_DAILY,
   ANTIGRAVITY_ENDPOINT_DAILY_SANDBOX,
+  ANTIGRAVITY_ENDPOINT_PROD,
 ];
 export const LOAD_ENDPOINT_FALLBACKS = [
-  ANTIGRAVITY_ENDPOINT_PROD,
   ANTIGRAVITY_ENDPOINT_DAILY,
   ANTIGRAVITY_ENDPOINT_DAILY_SANDBOX,
+  ANTIGRAVITY_ENDPOINT_PROD,
 ];
 
 const PROJECT_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -104,7 +109,7 @@ export function loadEndpointCandidates(explicitBaseUrl?: string): string[] {
 }
 
 function defaultUserAgent(): string {
-  return "antigravity/cli/1.1.23 (aidev_client; os_type=linux; arch=amd64; cl=974125021; auth_method=consumer)";
+  return "antigravity/cli/1.2.4 (aidev_client; os_type=linux; arch=amd64; cl=982146307; auth_method=consumer)";
 }
 
 export function antigravityHeaders(token: string): Record<string, string> {
@@ -150,6 +155,9 @@ export async function loadCodeAssist(
         body: loadCodeAssistBody(),
         signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
       });
+
+      setLastEndpoint(base);
+      setLastStatus(firstResponse.status);
 
       if (!firstResponse.ok) continue;
 

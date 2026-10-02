@@ -6,6 +6,14 @@ import {
   resolveProjectId,
 } from "../client/client.js";
 import {
+  setLastEndpoint,
+  setLastError,
+  setLastLatencyMs,
+  setLastProjectId,
+  setLastResolvedRuntimeModel,
+  setLastStatus,
+} from "../diagnostics/diagnostics.js";
+import {
   getAntigravityRequestModelId,
   getFallbackRuntimeModel,
 } from "../models/models.js";
@@ -302,6 +310,8 @@ export async function* streamAntigravity(
     options.projectId,
     options.baseURL,
   );
+  setLastProjectId(projectId);
+  const startTime = Date.now();
   const baseRuntimeModel = getAntigravityRequestModelId(modelId, options.reasoningEffort);
 
   let initialRuntimeModel = baseRuntimeModel;
@@ -316,6 +326,7 @@ export async function* streamAntigravity(
 
   for (let candIdx = 0; candIdx < runtimeCandidates.length; candIdx++) {
     const runtimeModel = runtimeCandidates[candIdx]!;
+    setLastResolvedRuntimeModel(runtimeModel);
     const isClaudeReasoning =
       (modelId.startsWith("claude-") || runtimeModel.startsWith("claude-"));
 
@@ -339,6 +350,7 @@ export async function* streamAntigravity(
 
       let response: Response;
       try {
+        setLastEndpoint(base);
         response = await fetchWithHeaderDeadline(
           url,
           { method: "POST", headers: requestHeaders, body: JSON.stringify(requestBody) },
@@ -346,6 +358,8 @@ export async function* streamAntigravity(
           streamHeaderTimeoutMs(),
           streamStallTimeoutMs(),
         );
+        setLastStatus(response.status);
+        setLastLatencyMs(Date.now() - startTime);
       } catch (err: unknown) {
         if (callOptions.abortSignal?.aborted) {
           yield {
@@ -356,12 +370,14 @@ export async function* streamAntigravity(
           return;
         }
         lastError = err instanceof Error ? err : new Error(String(err));
+        setLastError(lastError.message);
         continue;
       }
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         lastError = new Error(friendlyAntigravityError(response.status, errorText));
+        setLastError(lastError.message);
         if (response.status === 401) {
           yield {
             type: "error",

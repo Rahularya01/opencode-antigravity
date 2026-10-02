@@ -29,9 +29,17 @@ export type ModelQuotaRow = {
   recommended?: boolean;
 };
 
+export type TierInfo = {
+  id?: string;
+  name?: string;
+  description?: string;
+};
+
 export type AccountUsage = {
   projectId: string;
   planLabel?: string;
+  productTier?: TierInfo;
+  paidTier?: TierInfo;
   groups: QuotaGroup[];
   quotaSummaryError?: string;
   models: ModelQuotaRow[];
@@ -133,6 +141,30 @@ function parseModels(raw: Record<string, ModelInfoRaw>): ModelQuotaRow[] {
   return models;
 }
 
+function parseTier(value: unknown): TierInfo | undefined {
+  if (!isRecord(value)) return undefined;
+  if (!value.id && !value.name) return undefined;
+  return {
+    id: value.id ? String(value.id) : undefined,
+    name: value.name ? String(value.name) : undefined,
+    description: value.description ? String(value.description) : undefined,
+  };
+}
+
+async function loadCodeAssistSafe(token: string) {
+  try {
+    return await postInternalJson("/v1internal:loadCodeAssist", token, {
+      metadata: {
+        ideType: "ANTIGRAVITY",
+        platform: "PLATFORM_UNSPECIFIED",
+        pluginType: "GEMINI",
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function fetchQuotaSummarySafe(
   token: string,
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
@@ -149,12 +181,34 @@ export async function fetchAccountUsage(
   explicitProjectId?: string,
 ): Promise<AccountUsage> {
   const initialProjectId = await resolveProjectId(token, explicitProjectId);
-  const [discovered, summaryRes, available] = await Promise.all([
-    loadCodeAssist(token, initialProjectId).catch(() => undefined),
+  const [assistResult, summaryRes, available] = await Promise.all([
+    loadCodeAssistSafe(token),
     fetchQuotaSummarySafe(token),
     fetchAvailableModelsCatalog(token, initialProjectId),
   ]);
-  const projectId = discovered || initialProjectId;
+
+  const assistData = (isRecord(assistResult?.data) ? assistResult.data : {}) as Record<string, unknown>;
+  const productTier = parseTier(assistData.currentTier);
+  const paidTier = parseTier(assistData.paidTier);
+
+  // Google returns currentTier=free-tier even for Google AI Pro accounts.
+  // The real subscription lives in paidTier (e.g. g1-pro-tier / Google AI Pro).
+  const planLabel = paidTier?.name
+    ? `${paidTier.name}${paidTier.id ? ` (${paidTier.id})` : ""}`
+    : productTier?.name
+      ? `${productTier.name}${productTier.id ? ` (${productTier.id})` : ""}`
+      : undefined;
+
+  let discoveredProject: string | undefined;
+  if (assistResult && isRecord(assistResult.data)) {
+    const proj = assistResult.data.cloudaicompanionProject;
+    if (typeof proj === "string" && proj.trim()) discoveredProject = proj.trim();
+    else if (isRecord(proj) && typeof proj.id === "string" && proj.id.trim()) {
+      discoveredProject = proj.id.trim();
+    }
+  }
+
+  const projectId = discoveredProject || initialProjectId;
   const { groups } = summaryRes.ok ? parseQuotaSummary(summaryRes.data) : { groups: [] };
   const models = parseModels(available.models ?? {});
   const defaultAgentModelId =
@@ -166,6 +220,9 @@ export async function fetchAccountUsage(
 
   return {
     projectId,
+    planLabel,
+    productTier,
+    paidTier,
     groups,
     quotaSummaryError: summaryRes.ok ? undefined : summaryRes.error,
     models,

@@ -27,7 +27,7 @@ describe("Antigravity project discovery", () => {
   it("keeps looking after a 200 response with no project instead of inventing an ID", async () => {
     const fetchMock = mock(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.startsWith("https://daily-cloudcode-pa.googleapis.com/")) {
+      if (url.startsWith("https://daily-cloudcode-pa.sandbox.googleapis.com/")) {
         return new Response(JSON.stringify({ cloudaicompanionProject: "real-cloud-project" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -62,7 +62,7 @@ describe("Antigravity project discovery", () => {
 
   it("uses the observed CLI request fingerprint", () => {
     const headers = antigravityHeaders("token");
-    expect(headers["User-Agent"]).toContain("antigravity/cli/1.1.23");
+    expect(headers["User-Agent"]).toContain("antigravity/cli/1.2.4");
     expect(headers.Accept).toBeUndefined();
     expect(headers["X-Goog-Api-Client"]).toBeUndefined();
     expect(headers["Client-Metadata"]).toBeUndefined();

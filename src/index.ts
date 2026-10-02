@@ -4,5 +4,7 @@ export * from "./auth/index.js";
 export * from "./client/index.js";
 export * from "./models/index.js";
 export * from "./stream/index.js";
+export * from "./search/index.js";
+export * from "./diagnostics/index.js";
 export * from "./opencode/index.js";
 export { createAntigravity as default } from "./opencode/sdk.js";

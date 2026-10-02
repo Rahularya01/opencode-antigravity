@@ -2,6 +2,10 @@ export function antigravityEnv(name: string): string | undefined {
   return process.env[`OPENCODE_ANTIGRAVITY_${name}`] || process.env[`ANTIGRAVITY_${name}`] || process.env[`NOAGY_${name}`];
 }
 
+export function isExtraToolEnabled(tool: "SEARCH" | "IMAGE"): boolean {
+  return antigravityEnv("NO_EXTRA_TOOLS") !== "1" && antigravityEnv(`NO_${tool}_TOOL`) !== "1";
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -11,8 +15,13 @@ export function asString(value: unknown): string | undefined {
 }
 
 export function sanitizeText(text: unknown): string {
-  return String(text ?? "").replace(
-    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+  const str = String(text ?? "");
+  const toWellFormed = (str as unknown as { toWellFormed?: () => string }).toWellFormed;
+  if (typeof toWellFormed === "function") {
+    return toWellFormed.call(str);
+  }
+  return str.replace(
+    /(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF]))|(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])/g,
     "\uFFFD",
   );
 }
@@ -80,6 +89,7 @@ export function antigravityRequestEnvelope(
     lastStepIndex?: number;
     requestIndex?: number;
     isNonGemini?: boolean;
+    lastExecutionId?: string;
   },
 ): { requestId: string; sessionId: string; labels: Record<string, string> } {
   const providedSession = options?.sessionId?.trim();
@@ -104,6 +114,13 @@ export function antigravityRequestEnvelope(
   };
   const modelEnum = getModelEnum(wireModelId);
   if (modelEnum) labels.model_enum = modelEnum;
+
+  // Pure agy CLI wire alignment: last_execution_id is present on subsequent turns (step > 1).
+  if (step > 1) {
+    labels.last_execution_id =
+      options?.lastExecutionId || deterministicUuid(`antigravity:exec:${trajectoryId}:${step - 1}`);
+  }
+
   return {
     requestId: `agent/${agentId}/${Date.now()}/${trajectoryId}/${step}`,
     sessionId,

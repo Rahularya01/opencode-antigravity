@@ -99,14 +99,18 @@ Review these permissions before approving access. If your credentials expire or 
 | `/antigravity-usage`        | Show the server-reported shared quota groups and reset times (`antigravity_usage` tool).             |
 | `/antigravity-models`       | List available runtime models, remaining shared-pool quota, and capabilities (`antigravity_models`). |
 | `/antigravity-image`        | Generate an image via Antigravity (`generate_image` tool).                                           |
+| `/antigravity-search`       | Search the web using Google Search Grounding via Antigravity (`google_search` tool).                 |
+| `/antigravity-doctor`       | Show sanitized provider diagnostics, endpoints, and resolved model (`antigravity_doctor` tool).     |
 
 The plugin also registers tools the model can call directly:
 
 | Tool                 | Description                                                                                                                      |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `generate_image`     | Create an image and save it under `.opencode/generated-images/` unless `path` is set. Optional `aspectRatio` and `model`.        |
+| `google_search`      | Real-time web search and URL analysis using Google Search Grounding powered by Gemini 3 Flash.                                   |
 | `antigravity_usage`  | Shared quota pools and reset times. Free-tier accounts may not get the aggregate summary; per-model remaining % still works.     |
 | `antigravity_models` | Runtime models with remaining shared-pool quota. Set `all=true` to include tab/chat models.                                      |
+| `antigravity_doctor` | Show sanitized Antigravity provider diagnostics, including the endpoint, status, and resolved runtime model.                    |
 
 Model availability, entitlement, quota groups, and resets are returned by the service and can differ by account. The quota percentage shown for a model can represent a shared pool, not a private per-model allowance.
 
@@ -141,16 +145,19 @@ OpenCode owns the chat UI, tools (`read`, `write`, `edit`, `bash`, …), permiss
 
 Lookup order is `OPENCODE_ANTIGRAVITY_*`, then `ANTIGRAVITY_*`, then the legacy `NOAGY_*` prefix.
 
-| Variable                    | Purpose                                                                                                          |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `ANTIGRAVITY_ACCESS_TOKEN`  | Direct OAuth access token override. `GOOGLE_ACCESS_TOKEN` is also accepted.                                      |
-| `ANTIGRAVITY_BASE_URL`      | Override the API base URL. It must be HTTPS, contain no URL credentials, and target an allowed Google APIs host. |
-| `ANTIGRAVITY_PROJECT_ID`    | Use a specific Cloud Code Assist project ID instead of discovery or the managed fallback.                        |
-| `ANTIGRAVITY_CALLBACK_HOST` | Bind OAuth callback to `127.0.0.1`, `::1`, or `localhost` only. Defaults to `127.0.0.1`.                         |
-| `ANTIGRAVITY_USER_AGENT`    | Override the request user-agent.                                                                                 |
-| `ANTIGRAVITY_CLIENT_ID`     | Use a custom Google OAuth client ID.                                                                             |
-| `ANTIGRAVITY_CLIENT_SECRET` | Use a custom Google OAuth client secret. Keep it out of source control and shell history.                        |
-| `ANTIGRAVITY_NO_PREWARM`    | Set to `1` to skip the TLS pre-warm request made when the provider loads.                                        |
+| Variable                     | Purpose                                                                                                          |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `ANTIGRAVITY_ACCESS_TOKEN`   | Direct OAuth access token override. `GOOGLE_ACCESS_TOKEN` is also accepted.                                      |
+| `ANTIGRAVITY_BASE_URL`       | Override the API base URL. It must be HTTPS, contain no URL credentials, and target an allowed Google APIs host. |
+| `ANTIGRAVITY_PROJECT_ID`     | Use a specific Cloud Code Assist project ID instead of discovery or the managed fallback.                        |
+| `ANTIGRAVITY_CALLBACK_HOST`  | Bind OAuth callback to `127.0.0.1`, `::1`, or `localhost` only. Defaults to `127.0.0.1`.                         |
+| `ANTIGRAVITY_USER_AGENT`     | Override the request user-agent.                                                                                 |
+| `ANTIGRAVITY_CLIENT_ID`      | Use a custom Google OAuth client ID.                                                                             |
+| `ANTIGRAVITY_CLIENT_SECRET`  | Use a custom Google OAuth client secret. Keep it out of source control and shell history.                        |
+| `ANTIGRAVITY_NO_PREWARM`     | Set to `1` to skip the TLS pre-warm request made when the provider loads.                                        |
+| `ANTIGRAVITY_NO_EXTRA_TOOLS` | Set to `1` to disable both `google_search` and `generate_image` extra tools.                                      |
+| `ANTIGRAVITY_NO_SEARCH_TOOL` | Set to `1` to disable the `google_search` tool (e.g. to avoid clashing with other search providers).             |
+| `ANTIGRAVITY_NO_IMAGE_TOOL`  | Set to `1` to disable the `generate_image` tool.                                                                 |
 
 By default, the plugin tries `https://cloudcode-pa.googleapis.com`, then the daily host, then the sandbox host. Prefer the built-in OAuth client unless you have a reason to use your own credentials.
 

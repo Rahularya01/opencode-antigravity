@@ -6,6 +6,7 @@ import {
 import { isGeneratedProjectId, ANTIGRAVITY_MANAGED_PROJECT_ID } from "../client/client.js";
 import { modelsToOpenCodeConfig } from "../models/catalog.js";
 import { loadLiveOpenCodeModels } from "../models/discovery.js";
+import { isExtraToolEnabled } from "../utils/util.js";
 import { ANTIGRAVITY_PROVIDER_ID } from "./plugin-id.js";
 import { resolveCatalogAccessToken } from "./auth-store.js";
 import { createAntigravityTools } from "./tools.js";
@@ -77,11 +78,27 @@ export function createAntigravityPlugin(sdkModuleUrl: string): Plugin {
         "List Antigravity runtime models and remaining quota",
         "Call the antigravity_models tool and show the result to the user. Do not add extra commentary.",
       );
+      if (isExtraToolEnabled("IMAGE")) {
+        registerCommand(
+          cfg,
+          "antigravity-image",
+          "Generate an image via Antigravity",
+          "Call the generate_image tool with the user's remaining prompt as the image description. If they specified a ratio or path, pass those through.",
+        );
+      }
+      if (isExtraToolEnabled("SEARCH")) {
+        registerCommand(
+          cfg,
+          "antigravity-search",
+          "Search the web via Google Search Grounding",
+          "Call the google_search tool with the user's remaining prompt as the query. If they specified directives or urls, pass those through.",
+        );
+      }
       registerCommand(
         cfg,
-        "antigravity-image",
-        "Generate an image via Antigravity",
-        "Call the generate_image tool with the user's remaining prompt as the image description. If they specified a ratio or path, pass those through.",
+        "antigravity-doctor",
+        "Show sanitized Antigravity provider diagnostics",
+        "Call the antigravity_doctor tool and show the result to the user. Do not add extra commentary.",
       );
     },
 

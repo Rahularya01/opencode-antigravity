@@ -128,6 +128,8 @@ describe("OpenCode Plugin & SDK", () => {
     } as any);
 
     expect(plugin.tool?.generate_image).toBeDefined();
+    expect(plugin.tool?.google_search).toBeDefined();
+    expect(plugin.tool?.antigravity_doctor).toBeDefined();
     expect(plugin.tool?.antigravity_usage).toBeDefined();
     expect(plugin.tool?.antigravity_models).toBeDefined();
     expect(plugin.provider?.id).toBe(ANTIGRAVITY_PROVIDER_ID);
@@ -137,6 +139,8 @@ describe("OpenCode Plugin & SDK", () => {
     expect(cfg.command["antigravity-usage"]).toBeDefined();
     expect(cfg.command["antigravity-models"]).toBeDefined();
     expect(cfg.command["antigravity-image"]).toBeDefined();
+    expect(cfg.command["antigravity-search"]).toBeDefined();
+    expect(cfg.command["antigravity-doctor"]).toBeDefined();
 
     globalThis.fetch = mock(async (input: string | URL | Request) => {
       const url = String(input);
