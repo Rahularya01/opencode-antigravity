@@ -68,7 +68,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "3.0.15",
-    "@opencode-ai/plugin": "1.18.26",
+    "@opencode-ai/plugin": "1.19.5",
     "@types/bun": "1.4.0",
     "typescript": "5.9.3"
   }
